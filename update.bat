@@ -55,7 +55,12 @@ for %%r in (fullstack-agent ai-memory-vault backtalk barehands ai-visualizer) do
   if exist "%%r\.git\" call :one "%%r"
 )
 echo update complete.
-if not exist "%USERPROFILE%\Desktop\Update *" echo Tip: want a desktop Update icon that does this on a double-click? Open your agent and ask for one.
+rem Resolve the real Desktop folder (OneDrive redirection moves it off
+rem %USERPROFILE%\Desktop); fall back to the classic path if the query fails.
+set "DESKTOP_DIR="
+for /f "delims=" %%d in ('powershell -NoProfile -Command "[Environment]::GetFolderPath('Desktop')" 2^>nul') do set "DESKTOP_DIR=%%d"
+if not defined DESKTOP_DIR set "DESKTOP_DIR=%USERPROFILE%\Desktop"
+if not exist "%DESKTOP_DIR%\Update *" echo Tip: want a desktop Update icon that does this on a double-click? Open your agent and ask for one.
 exit /b 0
 
 :one
