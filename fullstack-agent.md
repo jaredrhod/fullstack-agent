@@ -65,7 +65,7 @@ ai-memory-vault, backtalk, barehands, ai-visualizer.
 
 **The adoption exceptions, checked before each clone:**
 
-- A piece already downloaded from these repos somewhere on the machine, that they actively use: do not duplicate it. Wire to their copy where it stands; wiring is just paths. A stale, unmodified copy sitting outside the home folder is different: prefer a fresh copy inside the home (so the update script reaches it) and leave the old one untouched.
+- A piece already downloaded from these repos somewhere on the machine that they actively use: do not duplicate it. Wire to their copy where it stands; wiring is just paths. A stale, unmodified copy sitting outside the home folder is different: prefer a fresh copy inside the home (so the update script reaches it) and leave the old one untouched.
 - A HAND-BUILT voice line or visualizer from the prompts era: our repo installs as the new default, and you say the honest sentence: "your old build stays right where it is; it just will not be the one that runs." Their files are never touched.
 - A hand-built visualizer SCENE (they designed what appears on screen): offer the promotion. COPY, never move, their page into `ai-visualizer/faces/<their-name-for-it>/index.html` with a small `face.json`, so their creation appears in the gallery beside the shipped faces. This is the one piece of the old world that is not an inferior copy of ours; treat it with respect.
 
