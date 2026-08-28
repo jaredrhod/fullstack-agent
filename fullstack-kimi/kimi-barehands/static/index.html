@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>barehands | fullstack-kimi</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; background: #000; color: #fff; font-family: system-ui, sans-serif; overflow: hidden; }
+    #video { position: fixed; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); opacity: 0.4; }
+    #canvas { position: fixed; top: 0; left: 0; width: 100%; height: 100%; }
+    #hud {
+      position: fixed; top: 1rem; left: 0; width: 100%; text-align: center;
+      pointer-events: none; text-shadow: 0 0 10px #000;
+    }
+    #gesture { font-size: 2rem; color: #0ff; }
+    #status { font-size: 1rem; color: #aaa; margin-top: 0.5rem; }
+    #start {
+      position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+      background: #000c; z-index: 10;
+    }
+    button { padding: 1rem 2rem; font-size: 1.2rem; background: #0ff; color: #000; border: none; border-radius: 8px; cursor: pointer; }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+</head>
+<body>
+  <video id="video" playsinline></video>
+  <canvas id="canvas"></canvas>
+  <div id="hud">
+    <div id="gesture">—</div>
+    <div id="status">Click start to enable camera</div>
+  </div>
+  <div id="start"><button id="startBtn">Start barehands</button></div>
+
+  <script>
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const gestureEl = document.getElementById('gesture');
+    const statusEl = document.getElementById('status');
+    const startBtn = document.getElementById('startBtn');
+    const startOverlay = document.getElementById('start');
+
+    let width, height;
+    function resize() { width = canvas.width = window.innerWidth; height = canvas.height = window.innerHeight; }
+    window.addEventListener('resize', resize); resize();
+
+    function dist(a, b) { return Math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2); }
+
+    function detectGesture(landmarks) {
+      const wrist = landmarks[0];
+      const tips = [landmarks[4], landmarks[8], landmarks[12], landmarks[16], landmarks[20]];
+      const bases = [landmarks[2], landmarks[5], landmarks[9], landmarks[13], landmarks[17]];
+      const extended = tips.map((tip, i) => dist(tip, wrist) > dist(bases[i], wrist) * 1.3);
+
+      // Pinch: thumb tip close to index tip
+      if (dist(landmarks[4], landmarks[8]) < 0.05) return 'pinch';
+
+      // Point: only index extended
+      if (extended[1] && !extended[2] && !extended[3] && !extended[4]) return 'point';
+
+      // Open palm: all fingers extended
+      if (extended.every(Boolean)) return 'open';
+
+      // Fist: no fingers extended
+      if (!extended.some(Boolean)) return 'fist';
+
+      return 'neutral';
+    }
+
+    let lastGesture = 'neutral';
+    let gestureStart = 0;
+    async function postState(gesture, hand) {
+      const payload = { gesture, hand, timestamp: Date.now() };
+      try { await fetch('/state', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); } catch (e) {}
+    }
+
+    function onResults(results) {
+      ctx.clearRect(0, 0, width, height);
+      let gesture = 'neutral';
+      if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+        const landmarks = results.multiHandLandmarks[0];
+        drawConnectors(ctx, landmarks, HAND_CONNECTIONS, {color: '#00ffff', lineWidth: 2});
+        drawLandmarks(ctx, landmarks, {color: '#ff00ff', lineWidth: 1, radius: 4});
+        gesture = detectGesture(landmarks);
+      }
+      gestureEl.textContent = gesture;
+      statusEl.textContent = results.multiHandLandmarks ? 'hand detected' : 'no hand';
+
+      if (gesture !== lastGesture) {
+        lastGesture = gesture;
+        gestureStart = Date.now();
+      }
+      // Hold for 200ms before posting to reduce jitter
+      if (Date.now() - gestureStart > 200) {
+        postState(gesture, results.multiHandLandmarks ? 'right' : 'none');
+      }
+    }
+
+    const hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
+    hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
+    hands.onResults(onResults);
+
+    startBtn.addEventListener('click', async () => {
+      startOverlay.style.display = 'none';
+      statusEl.textContent = 'starting camera...';
+      const camera = new Camera(video, { onFrame: async () => { await hands.send({image: video}); }, width: 640, height: 480 });
+      await camera.start();
+    });
+  </script>
+</body>
+</html>

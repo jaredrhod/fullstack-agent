@@ -1,0 +1,6 @@
+{
+  "vault_dir": "~/my-kimi-agent/vault",
+  "agent_name": "Kimi",
+  "owner_name": "",
+  "daily_note_format": "sessions/%Y-%m-%d.md"
+}

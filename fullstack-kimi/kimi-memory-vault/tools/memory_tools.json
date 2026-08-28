@@ -1,0 +1,95 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "memory_search",
+      "description": "Search the agent's memory vault for notes matching a query. Use this when the user refers to something from a previous conversation, project, person, or topic.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Keywords to search for in the vault."
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Maximum number of results to return."
+          }
+        },
+        "required": ["query"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "memory_read",
+      "description": "Read a single note from the memory vault by its vault-relative path.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Vault-relative path to the note, e.g. 'projects/website.md'."
+          }
+        },
+        "required": ["path"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "memory_write",
+      "description": "Write or overwrite a note in the memory vault. Use this to remember facts, decisions, project plans, or session summaries.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Vault-relative path, e.g. 'people/alice.md' or 'topics/rust.md'."
+          },
+          "content": {
+            "type": "string",
+            "description": "Full Markdown content of the note."
+          }
+        },
+        "required": ["path", "content"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "memory_inbox",
+      "description": "Append a quick capture to the inbox for later processing.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "Short text to capture."
+          }
+        },
+        "required": ["text"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "memory_session",
+      "description": "Append a summary to today's session note. Use this at the end of a conversation to record what happened.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "Summary of the session or turn to remember."
+          }
+        },
+        "required": ["text"]
+      }
+    }
+  }
+]

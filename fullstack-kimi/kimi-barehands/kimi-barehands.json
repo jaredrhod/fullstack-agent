@@ -1,0 +1,5 @@
+{
+  "name": "Kimi",
+  "state_dir": "~/my-kimi-agent/kimi-voice",
+  "port": 8794
+}

@@ -33,7 +33,7 @@ from config import load_config
 class VoiceBridge:
     def __init__(self):
         self.cfg = load_config()
-        self.agent = Agent(self.cfg)
+        self.agent = Agent(self.cfg, approve_callback=self._approve_tool)
         self.stt = stt.STT(self.cfg)
         self.tts = tts.TTS(self.cfg)
         self.bus_dir = Path(self.cfg.get("bus_dir", "~")).expanduser()
@@ -43,6 +43,8 @@ class VoiceBridge:
         self.running = True
         self.talk_key = self.cfg.get("talk_key", "home")
         self.permission_mode = self.cfg.get("permission_mode", "ask")
+        self._approval_received = False
+        self._waiting_for_approval = False
 
         signal.signal(signal.SIGINT, self._on_signal)
         signal.signal(signal.SIGTERM, self._on_signal)
@@ -53,8 +55,37 @@ class VoiceBridge:
         self.state.set_idle()
         sys.exit(0)
 
+    def _approve_tool(self, name, description):
+        if self.permission_mode == "auto":
+            return True
+        # ask mode: speak the request and wait briefly for the talk key.
+        msg = f"May I run {name}?"
+        print(f"[asking permission] {msg}")
+        self.state.set_speaking(msg)
+        self.tts.speak(msg)
+        self.state.set_thinking()
+        # Simple timeout-based approval: wait up to 5 seconds for the talk key.
+        self._approval_received = False
+        self._waiting_for_approval = True
+        deadline = time.time() + 5
+        while time.time() < deadline and self.running:
+            if self._approval_received:
+                self._approval_received = False
+                self._waiting_for_approval = False
+                print(f"[approved] {name}")
+                return True
+            time.sleep(0.05)
+        self._waiting_for_approval = False
+        print(f"[denied by timeout] {name}")
+        return False
+
     def _on_press(self, key):
-        if self._key_matches(key, self.talk_key) and not self.listening:
+        if not self._key_matches(key, self.talk_key):
+            return
+        if self._waiting_for_approval:
+            self._approval_received = True
+            return
+        if not self.listening:
             self.listening = True
             audio.start_recording()
             self.state.set_listening()

@@ -1,0 +1,57 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "bash",
+      "description": "Run a shell command in the agent's home directory. Use this for file operations, git, running scripts, and inspecting the system. Prefer read_file/write_file for file content; use bash for directory listings, git, and commands.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string",
+            "description": "The shell command to run."
+          }
+        },
+        "required": ["command"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "read_file",
+      "description": "Read the contents of a file. Use this to inspect code, configs, or notes.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Absolute or home-relative path to the file."
+          }
+        },
+        "required": ["path"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "write_file",
+      "description": "Write content to a file. Creates parent directories if needed.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Absolute or home-relative path to the file."
+          },
+          "content": {
+            "type": "string",
+            "description": "Full content to write."
+          }
+        },
+        "required": ["path", "content"]
+      }
+    }
+  }
+]

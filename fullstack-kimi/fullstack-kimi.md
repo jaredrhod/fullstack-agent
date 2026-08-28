@@ -58,8 +58,10 @@ Collect every remaining answer now, so no later step ever has to ask. Skip anyth
 
 ## Phase 3: Install the pieces
 
-Clone each chosen piece into the home folder as a sibling of this repo, from `github.com/jaredrhod/<name>`:
+Each piece can be used bundled inside this repo or cloned as a sibling from `github.com/jaredrhod/<name>`:
 `kimi-memory-vault`, `kimi-voice`, `kimi-visualizer`, `kimi-barehands`.
+
+If the bundled copy exists, use it. Otherwise clone the repo into the home folder.
 
 **The adoption exceptions, checked before each clone:**
 
