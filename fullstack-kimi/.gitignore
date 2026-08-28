@@ -1,0 +1,4 @@
+# User-specific state and configs live outside git tracking
+*.mine
+*.log
+.DS_Store
