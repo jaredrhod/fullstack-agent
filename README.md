@@ -64,7 +64,7 @@ Then you're exactly who this was designed around. If you set up a memory vault, 
 
 - The wizard never deletes, overwrites, or moves anything you built. Replacements retire the old thing in place and say so.
 - Your vault stays wherever it already lives. Pieces connect by configuration paths, not by relocation.
-- Requirements per piece: the voice needs a mic and about 1 GB of local models on first run; the hands need a webcam and Chrome; the mind and face need nothing but Python 3, which ships with macOS and most Linux. Windows notes live in each piece's own README.
+- Requirements per piece: the voice needs a mic and about 1 GB of local models on first run; the hands need a webcam and Chrome; the mind and face need nothing but Python 3, which ships with macOS and most Linux distributions. Windows notes live in each piece's own README.
 - Cross-piece problems: `TROUBLESHOOTING.md` here. Everything else: each piece's own guide.
 
 ## The rest of it
