@@ -1,0 +1,6 @@
+{
+  "name": "Kimi",
+  "face": "board",
+  "bus_dir": "~/my-kimi-agent/kimi-voice",
+  "port": 8790
+}

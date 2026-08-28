@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>neural | fullstack-kimi</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; background: #020206; overflow: hidden; }
+    canvas { display: block; }
+    #hud {
+      position: fixed; bottom: 2rem; left: 0; width: 100%;
+      text-align: center; color: #aa88ff; font-family: system-ui, sans-serif;
+      pointer-events: none; text-shadow: 0 0 10px #aa88ff88;
+    }
+    #name { font-size: 1.5rem; letter-spacing: 0.2em; text-transform: uppercase; }
+    #text { font-size: 1rem; margin-top: 0.5rem; min-height: 1.5em; opacity: 0.8; }
+  </style>
+</head>
+<body>
+  <canvas id="face"></canvas>
+  <div id="hud">
+    <div id="name">Kimi</div>
+    <div id="text"></div>
+  </div>
+  <script>
+    const canvas = document.getElementById('face');
+    const ctx = canvas.getContext('2d');
+    const nameEl = document.getElementById('name');
+    const textEl = document.getElementById('text');
+
+    let width, height, state = 'idle', waveform = new Array(16).fill(0), text = '', time = 0;
+    const neurons = [];
+    for (let i = 0; i < 24; i++) neurons.push({ x: Math.random(), y: Math.random(), z: Math.random(), phase: Math.random() * Math.PI * 2 });
+
+    function resize() { width = canvas.width = window.innerWidth; height = canvas.height = window.innerHeight; }
+    window.addEventListener('resize', resize); resize();
+
+    async function fetchState() {
+      try { const d = await (await fetch('/state')).json(); state = d.state || 'idle'; waveform = d.waveform || waveform; text = d.text || ''; } catch (e) { state = 'idle'; }
+      try { const d = await (await fetch('/config')).json(); if (d.name) nameEl.textContent = d.name; } catch (e) {}
+      textEl.textContent = text;
+    }
+    setInterval(fetchState, 100); fetchState();
+
+    function energy() { return state === 'speaking' ? 1 : state === 'listening' ? 0.75 : state === 'thinking' ? 0.55 : 0.2; }
+    function color() { return state === 'speaking' ? '#aa88ff' : state === 'listening' ? '#88aaff' : state === 'thinking' ? '#ff88aa' : '#5555aa'; }
+
+    function project(n) {
+      const cx = width / 2, cy = height / 2;
+      const scale = 0.6 + n.z * 0.4;
+      const x = cx + (n.x - 0.5) * width * scale;
+      const y = cy + (n.y - 0.5) * height * scale;
+      return { x, y, scale };
+    }
+
+    function draw() {
+      time += 0.02;
+      ctx.fillStyle = '#020206'; ctx.fillRect(0, 0, width, height);
+      const e = energy(), c = color();
+
+      for (const n of neurons) n.phase += 0.03 * (0.5 + e);
+
+      // Connections
+      ctx.strokeStyle = c;
+      for (let i = 0; i < neurons.length; i++) {
+        for (let j = i + 1; j < neurons.length; j++) {
+          const a = project(neurons[i]), b = project(neurons[j]);
+          const dx = a.x - b.x, dy = a.y - b.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist < 250) {
+            ctx.globalAlpha = (1 - dist / 250) * 0.4 * e;
+            ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+          }
+        }
+      }
+
+      // Neurons
+      for (let i = 0; i < neurons.length; i++) {
+        const n = neurons[i];
+        const p = project(n);
+        const pulse = Math.sin(n.phase) * 0.5 + 0.5;
+        const r = 4 + pulse * 6 * e + waveform[i % waveform.length] * 8;
+        ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+        ctx.fillStyle = c;
+        ctx.shadowBlur = 15 * e;
+        ctx.shadowColor = c;
+        ctx.globalAlpha = 0.7 + pulse * 0.3;
+        ctx.fill();
+      }
+      ctx.shadowBlur = 0; ctx.globalAlpha = 1;
+      requestAnimationFrame(draw);
+    }
+    draw();
+  </script>
+</body>
+</html>

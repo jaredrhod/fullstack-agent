@@ -1,6 +1,6 @@
 # fullstack-kimi
 
-> **Status:** installer scaffold. The component repos (`kimi-memory-vault`, `kimi-voice`, `kimi-visualizer`, `kimi-barehands`) are stubs that will be linked once they are published. This directory contains the installer, launcher, and wiring logic.
+> **Status:** installer scaffold + working visualizer. `kimi-visualizer` is bundled and runs a browser-based face. The other component repos (`kimi-memory-vault`, `kimi-voice`, `kimi-barehands`) are stubs that will be linked once they are published.
 
 A Kimi-powered port of [fullstack-agent](https://github.com/jaredrhod/fullstack-agent). It gives Kimi Code CLI the same full stack: **memory, voice, face, and optional hands**.
 

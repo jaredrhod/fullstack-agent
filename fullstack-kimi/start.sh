@@ -42,21 +42,29 @@ trap cleanup EXIT INT TERM
 
 echo "fullstack-kimi: starting from $HOME_DIR"
 
-if [ -d "$HOME_DIR/kimi-visualizer" ] && [ "$MODE" != "hands" ]; then
-  (cd "$HOME_DIR/kimi-visualizer" && exec python3 server.py) &
+# Components can live either as siblings of this repo or bundled inside it.
+VIS_DIR="$HOME_DIR/kimi-visualizer"
+[ -d "$VIS_DIR" ] || VIS_DIR="$HERE/kimi-visualizer"
+HANDS_DIR="$HOME_DIR/kimi-barehands"
+[ -d "$HANDS_DIR" ] || HANDS_DIR="$HERE/kimi-barehands"
+VOICE_DIR="$HOME_DIR/kimi-voice"
+[ -d "$VOICE_DIR" ] || VOICE_DIR="$HERE/kimi-voice"
+
+if [ -d "$VIS_DIR" ] && [ "$MODE" != "hands" ]; then
+  (cd "$VIS_DIR" && exec python3 server.py) &
   PIDS+=($!)
   echo "  face:  starting (your browser opens on the visualizer)"
 fi
 
-if [ -d "$HOME_DIR/kimi-barehands" ] && [ "$MODE" != "voice" ]; then
-  (cd "$HOME_DIR/kimi-barehands" && exec python3 server.py) &
+if [ -d "$HANDS_DIR" ] && [ "$MODE" != "voice" ]; then
+  (cd "$HANDS_DIR" && exec python3 server.py) &
   PIDS+=($!)
   echo "  hands: starting (open the printed URL in Chrome when you want the board)"
 fi
 
-if [ -d "$HOME_DIR/kimi-voice" ]; then
+if [ -d "$VOICE_DIR" ]; then
   echo "  voice: starting (hold your talk key and speak; Ctrl-C here stops everything)"
-  cd "$HOME_DIR/kimi-voice" && ./run.sh
+  cd "$VOICE_DIR" && ./run.sh
 else
   echo
   echo "No voice installed; servers are up. Ctrl-C stops everything."

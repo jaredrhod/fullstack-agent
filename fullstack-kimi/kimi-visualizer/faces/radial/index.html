@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>radial | fullstack-kimi</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; background: #050508; overflow: hidden; }
+    canvas { display: block; }
+    #hud {
+      position: fixed; bottom: 2rem; left: 0; width: 100%;
+      text-align: center; color: #ff66cc; font-family: system-ui, sans-serif;
+      pointer-events: none; text-shadow: 0 0 10px #ff66cc88;
+    }
+    #name { font-size: 1.5rem; letter-spacing: 0.2em; text-transform: uppercase; }
+    #text { font-size: 1rem; margin-top: 0.5rem; min-height: 1.5em; opacity: 0.8; }
+  </style>
+</head>
+<body>
+  <canvas id="face"></canvas>
+  <div id="hud">
+    <div id="name">Kimi</div>
+    <div id="text"></div>
+  </div>
+  <script>
+    const canvas = document.getElementById('face');
+    const ctx = canvas.getContext('2d');
+    const nameEl = document.getElementById('name');
+    const textEl = document.getElementById('text');
+
+    let width, height, state = 'idle', waveform = new Array(16).fill(0), text = '', time = 0;
+
+    function resize() { width = canvas.width = window.innerWidth; height = canvas.height = window.innerHeight; }
+    window.addEventListener('resize', resize); resize();
+
+    async function fetchState() {
+      try { const d = await (await fetch('/state')).json(); state = d.state || 'idle'; waveform = d.waveform || waveform; text = d.text || ''; } catch (e) { state = 'idle'; }
+      try { const d = await (await fetch('/config')).json(); if (d.name) nameEl.textContent = d.name; } catch (e) {}
+      textEl.textContent = text;
+    }
+    setInterval(fetchState, 100); fetchState();
+
+    function energy() { return state === 'speaking' ? 1 : state === 'listening' ? 0.75 : state === 'thinking' ? 0.5 : 0.2; }
+    function color() { return state === 'speaking' ? '#ff66cc' : state === 'listening' ? '#66ffcc' : state === 'thinking' ? '#ffcc66' : '#6666ff'; }
+
+    function draw() {
+      time += 0.02;
+      ctx.fillStyle = '#050508'; ctx.fillRect(0, 0, width, height);
+      const cx = width / 2, cy = height / 2;
+      const e = energy(), c = color();
+      const rings = 8;
+      for (let i = 0; i < rings; i++) {
+        const baseR = 40 + i * 45;
+        const amp = waveform[i % waveform.length] * 40 * e;
+        const r = baseR + amp;
+        const alpha = 0.1 + (1 - i / rings) * 0.5 * e;
+        ctx.strokeStyle = c;
+        ctx.globalAlpha = alpha;
+        ctx.lineWidth = 2 + e * 2;
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, time * (0.2 + i * 0.05) * (0.5 + e), time * (0.2 + i * 0.05) * (0.5 + e) + Math.PI * 1.5);
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+      requestAnimationFrame(draw);
+    }
+    draw();
+  </script>
+</body>
+</html>
