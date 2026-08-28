@@ -1,0 +1,6 @@
+openai>=1.30.0
+numpy
+sounddevice
+soundfile
+pynput
+pyttsx3

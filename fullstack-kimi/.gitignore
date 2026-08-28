@@ -2,3 +2,4 @@
 *.mine
 *.log
 .DS_Store
+.venv/

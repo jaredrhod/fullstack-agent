@@ -1,0 +1,26 @@
+{
+  "name": "Kimi",
+  "greeting": "Hello there, what are we working on today?",
+  "agent_dir": "~/my-kimi-agent",
+  "bus_dir": "~/my-kimi-agent/kimi-voice",
+  "extra_dirs": ["~/my-kimi-agent/vault"],
+  "mic_mode": "ptt",
+  "talk_key": "home",
+  "permission_mode": "ask",
+  "stt": {
+    "engine": "whisper_api",
+    "api_key": null,
+    "model": "whisper-1"
+  },
+  "tts": {
+    "engine": "pyttsx3",
+    "voice": null,
+    "rate": 180
+  },
+  "llm": {
+    "backend": "kimi_api",
+    "api_key": null,
+    "base_url": "https://api.moonshot.ai/v1",
+    "model": "kimi-k3"
+  }
+}
