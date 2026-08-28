@@ -136,7 +136,7 @@ Then **make the launchers**, so they never have to remember any of this. Four sh
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 ```
 
-A double-clicked shortcut launches with a bare system PATH where neither `claude` nor `uv` exist, so a launcher without the export fails silently. (Windows `.bat` files inherit the user's PATH and do not need it.)
+A double-clicked shortcut launches with a bare system PATH where neither `claude` nor `uv` exists, so a launcher without the export fails silently. (Windows `.bat` files inherit the user's PATH and do not need it.)
 
 On macOS make each `.command` executable, and warn them once: the first double-click may ask permission; that is macOS being protective, click Open.
 
