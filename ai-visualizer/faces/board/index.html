@@ -1,0 +1,1083 @@
+<!DOCTYPE html>
+<!--
+ai-visualizer: give your AI agent a face.
+Copyright (C) 2026 Jared Rhodenizer
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published
+by the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+SPDX-License-Identifier: AGPL-3.0-or-later
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Neural Link</title>
+<style>
+  :root{
+    --ink:#e8f0f2; --dim:#5a6a72; --dimmer:#39464e;
+    --gold:#e7c368; --gold-dim:#9a8347;
+    --green:#3ddc84; --red:#ff4d5e;
+    --chrome:#1c2f26;
+    --mono:"SF Mono",Menlo,Consolas,monospace;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{width:100%;height:100%;background:#020705;overflow:hidden;cursor:none}
+  body{font-family:var(--mono);color:var(--ink)}
+  canvas#stage{position:fixed;inset:0;width:100vw;height:100vh;display:block}
+
+  /* ---------- HUD chrome ---------- */
+  .hud{position:fixed;inset:0;pointer-events:none;z-index:10;transition:opacity .7s}
+  body.cine .hud{opacity:0}
+  .corner{position:absolute;width:34px;height:34px;border:1px solid var(--chrome)}
+  .corner.tl{top:18px;left:18px;border-right:none;border-bottom:none}
+  .corner.tr{top:18px;right:18px;border-left:none;border-bottom:none}
+  .corner.bl{bottom:18px;left:18px;border-right:none;border-top:none}
+  .corner.br{bottom:18px;right:18px;border-left:none;border-top:none}
+  .sq{position:absolute;width:16px;height:16px;border:1px solid var(--dimmer)}
+  .sq.tl{top:64px;left:34px}
+  .sq.tr{top:64px;right:34px}
+
+  #brand{position:absolute;top:34px;left:56px}
+  #brand .t{font-size:clamp(15px,1.1vw,22px);letter-spacing:.62em;color:var(--ink);text-shadow:0 0 12px rgba(120,255,190,.4)}
+  #brand .s{margin-top:7px;font-size:clamp(8px,.55vw,11px);letter-spacing:.34em;color:var(--dim)}
+  #brand .s b{color:var(--green);font-weight:normal}
+
+  #statusblock{position:absolute;top:34px;right:56px;text-align:right}
+  #statemode{font-size:clamp(13px,.95vw,19px);letter-spacing:.5em;color:var(--ink)}
+  #statemode .spin{display:inline-block;width:.85em;height:.85em;border:1px solid var(--dim);border-top-color:var(--ink);border-radius:50%;vertical-align:-8%;margin-left:.55em;animation:rot 1.1s linear infinite}
+  @keyframes rot{to{transform:rotate(360deg)}}
+  #clock{margin-top:8px;font-size:clamp(11px,.8vw,16px);letter-spacing:.3em;color:#8fe8b8;text-shadow:0 0 10px rgba(90,240,160,.4)}
+  #usage{margin-top:9px;font-size:clamp(8px,.6vw,12px);letter-spacing:.22em;color:var(--dim);line-height:1.6}
+  #usage .n{margin-left:.7em;color:#8fe8b8}
+  #usage .hot{color:#ff7a5c}
+  #orb{margin:14px 0 0 auto;width:clamp(34px,2.6vw,52px);height:clamp(34px,2.6vw,52px);border-radius:50%;
+       background:radial-gradient(circle at 38% 32%,#7dffb8 0%,#1d9c58 42%,#06301a 100%);
+       box-shadow:0 0 24px rgba(61,220,132,.5),inset 0 0 14px rgba(0,0,0,.55);position:relative}
+  #orb::after{content:"";position:absolute;inset:-5px;border-radius:50%;border:1px solid rgba(61,220,132,.35)}
+
+  @keyframes blink{50%{opacity:.15}}
+
+  /* bottom bar */
+  #micline{position:absolute;bottom:34px;left:56px;font-size:clamp(8px,.6vw,12px);letter-spacing:.3em;color:var(--dim)}
+  #micline .lit{color:#8fc4a8}
+  #hint{position:absolute;bottom:34px;right:56px;font-size:clamp(8px,.6vw,12px);letter-spacing:.3em;color:var(--dim);text-align:right}
+  #hint .proc{color:#8fe8b8;display:none}
+  #echo{position:absolute;bottom:76px;left:56px;font-size:clamp(10px,.72vw,14px);letter-spacing:.22em;color:#c5dccf;
+        text-shadow:0 0 8px rgba(120,250,180,.25)}
+  #echo .cur{display:inline-block;width:.55em;height:1.05em;background:#8fe8b8;vertical-align:-12%;animation:blink .9s steps(2,start) infinite}
+
+  #vig{position:fixed;inset:0;pointer-events:none;z-index:8;
+       background:radial-gradient(ellipse at 50% 50%,transparent 52%,rgba(0,0,0,.6) 100%)}
+</style>
+</head>
+<body>
+<canvas id="stage"></canvas>
+<div id="vig"></div>
+
+<div class="hud">
+  <div class="corner tl"></div><div class="corner tr"></div><div class="corner bl"></div><div class="corner br"></div>
+  <div class="sq tl"></div><div class="sq tr"></div>
+
+  <div id="brand">
+    <div class="t">J.A.R.V.I.S.</div>
+    <div class="s">NEURAL LINK - <b>CONNECTED</b></div>
+  </div>
+
+  <div id="statusblock">
+    <div id="statemode">IDLE</div>
+    <div id="clock">00:00:00</div>
+    <div id="orb"></div>
+    <div id="usage"></div>
+  </div>
+
+  <div id="echo"></div>
+  <div id="micline">SIGNAL BUS - <span class="lit">ONLINE</span></div>
+  <div id="hint"><span class="idlehint">SPACE - CINEMATIC FLYTHROUGH</span><span class="proc">PROCESSING...</span></div>
+</div>
+
+<script src="../../core.js"></script>
+<script>
+"use strict";
+/* ============================================================
+   THE CIRCUIT BOARD  ·  the living PCB face
+   Full-bleed procedural circuit board. Data pulses stream the
+   traces from the center chip; components flash as signals hit
+   them and chain onward. Green primary, amber secondary.
+   Idle = calm current · listening = the flow REVERSES (cool
+   signals converge inward on the chip) · thinking = the whole
+   board amps up, riding one eased energy curve (no jump cuts).
+   Driven by the voice bus through core.js (AV.state / AV.level).
+   Space = the LIVE CINEMATIC flythrough (again = bail out); C = same.
+   F = fullscreen; the fps meter is ?fps=1. ?demo=1 self-runs.
+   ?shot=idle|thinking|speaking[&cine=1]
+   &t=ms -> deterministic still for verification.
+   ============================================================ */
+
+const Q = new URLSearchParams(location.search);
+const SHOT = Q.get("shot");
+let seed = parseInt(Q.get("seed")||"7",10);
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+const rnd = mulberry32(seed);
+const R=(a,b)=>a+rnd()*(b-a);
+
+AV.init({});
+AV.ready(a=>{
+  document.title = a.label + " Neural Link";
+  document.querySelector("#brand .t").textContent = a.label;
+});
+
+const cv=document.getElementById("stage"), ctx=cv.getContext("2d");
+let W=0,H=0,DPR=1;
+
+const GREEN="#3ddc84", GREEN_HOT="#a6ffd0", AMBER="#e7c368", AMBER_HOT="#ffe9ae";
+/* the voice palette — the board goes multi-color while the agent talks */
+const SPEAK_COLS=["#35e0ff","#9d7bff","#ff4d9d","#5fa8ff","#46e28a","#e7c368"];
+/* listening = cool input colors flowing INTO the chip */
+const LISTEN_COLS=["#35e0ff","#5fa8ff"], LISTEN_COOL="#35e0ff";
+/* thinking = the label scrambles through this set (monospace-safe glyphs) */
+const SCRAM="ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789#$%&@<>/*+=?";
+function hex2rgb(h){const n=parseInt(h.slice(1),16);return[n>>16,(n>>8)&255,n&255]}
+function rgba(h,a){const[r,g,b]=hex2rgb(h);return`rgba(${r},${g},${b},${a})`}
+
+/* ---------------- state ---------------- */
+let now=0;
+const COMMAND="> run system diagnostics";
+let Ecur=.25;
+let busPrev="idle";
+let lvlS=0, rings=[], lastRing=0;   // smoothed voice level + chip sound-wave rings
+let talkS=0, speakingNowG=false;    // eased talk fade + spawn-time speaking flag
+let listenS=0;                      // eased listening fade (cool cast + inward flow)
+let thinkS=0;                       // eased thinking fade (label matrix-scramble)
+let echoT=-1;                       // demo flavor: typed command while thinking
+
+function targetEnergy(){
+  const s=AV.state, lvl=AV.level;
+  if(s==="thinking")return 1;
+  if(s==="speaking")return Math.min(.97,.5+.5*Math.pow(lvl,.7));
+  if(s==="listening")return .5;
+  return .25;
+}
+/* speech pulses need a fast ease; state changes keep the slow cinematic one */
+function easeTaus(){
+  if(AV.state==="speaking")return[90,230];
+  return[520,950];
+}
+
+/* The usage rows update on their own clock, NOT with syncHUD: syncHUD fires
+   only when the agent's STATE changes, and usage moves independently of it.
+   Hanging this off state would leave the numbers stale for as long as the
+   agent stayed in one state, which is most of the time. */
+function syncUsage(){
+  const el=$("usage");
+  const rows=AV.util.usageRows();
+  el.innerHTML=rows.map(r=>
+    `${r.label}<span class="n${r.hot?" hot":""}">${r.text}</span>`).join("<br>");
+}
+
+function syncHUD(){
+  const mode=$("statemode"),hint=$("hint");
+  const s=AV.state;
+  if(s==="thinking"){
+    mode.innerHTML='THINKING<span class="spin"></span>';
+    hint.querySelector(".proc").style.display="inline";hint.querySelector(".idlehint").style.display="none";
+  }else{
+    mode.textContent=s==="speaking"?"SPEAKING":s==="listening"?"LISTENING":"IDLE";
+    hint.querySelector(".proc").style.display="none";hint.querySelector(".idlehint").style.display="inline";
+  }
+}
+
+let usageT=1e9;   // large, so the first frame paints immediately
+/* ---------------- board data ---------------- */
+let cell=24, cols=0, rows=0, occ=null;
+let traces=[], comps=[], pulses=[], chip=null;
+let bgLayer=null, glowSprites={}, deco=null, grainTile=null, grainPat=null;
+
+function makeGlow(col,sz){
+  const c=document.createElement("canvas");c.width=c.height=sz;
+  const g=c.getContext("2d"),grd=g.createRadialGradient(sz/2,sz/2,0,sz/2,sz/2,sz/2);
+  grd.addColorStop(0,col);grd.addColorStop(.25,col.replace(")",",.55)").replace("rgb","rgba"));
+  grd.addColorStop(1,"rgba(0,0,0,0)");
+  g.fillStyle=grd;g.fillRect(0,0,sz,sz);return c;
+}
+const key=(x,y)=>x+"_"+y;
+const DIRS=[[1,0],[1,1],[0,1],[-1,1],[-1,0],[-1,-1],[0,-1],[1,-1]];
+
+function route(sx,sy,dir,maxLen){
+  let x=sx,y=sy,d=dir;
+  const pts=[[x,y]];
+  let run=2+(rnd()*5|0), blocked=0;
+  const total=maxLen??(14+(rnd()*30|0));
+  for(let s=0;s<total;s++){
+    const [dx,dy]=DIRS[d];
+    const nx=x+dx, ny=y+dy;
+    if(nx<1||ny<1||nx>=cols-1||ny>=rows-1||occ.has(key(nx,ny))){
+      d=(d+(rnd()<.5?1:7))%8;
+      if(++blocked>2)break;
+      continue;
+    }
+    blocked=0;x=nx;y=ny;
+    occ.add(key(x,y));pts.push([x,y]);
+    if(--run<=0){
+      if(rnd()<.7)d=(d+(rnd()<.5?1:7))%8;   // 45° turns — the PCB look
+      run=2+(rnd()*6|0);
+    }
+  }
+  if(pts.length<5)return null;
+  // simplify collinear runs, convert to px, cumulative lengths
+  const px=[],keep=[pts[0]];
+  for(let i=1;i<pts.length-1;i++){
+    const a=keep[keep.length-1],b=pts[i],c=pts[i+1];
+    if((b[0]-a[0])*(c[1]-b[1])!==(b[1]-a[1])*(c[0]-b[0]))keep.push(b);
+  }
+  keep.push(pts[pts.length-1]);
+  keep.forEach(p=>px.push([p[0]*cell+cell/2,p[1]*cell+cell/2]));
+  const cum=[0];
+  for(let i=1;i<px.length;i++)
+    cum.push(cum[i-1]+Math.hypot(px[i][0]-px[i-1][0],px[i][1]-px[i-1][1]));
+  return {pts:px,cum,len:cum[cum.length-1],end:pts[pts.length-1],start:pts[0]};
+}
+
+function buildBoard(){
+  cell=Math.max(16,Math.round(Math.min(W,H)/56));
+  cols=Math.ceil(W/cell);rows=Math.ceil(H/cell);
+  occ=new Set();traces=[];comps=[];pulses=[];
+
+  /* ---- the center chip: horizontal, carries the agent's name ---- */
+  const chW=Math.round(Math.min(W*.235,620*DPR)), chH=Math.round(chW*.30);
+  chip={x:W*.5-chW/2, y:H*.5-chH/2, w:chW, h:chH, glow:0, glowIn:0};
+  const cx0=Math.floor(chip.x/cell)-1, cy0=Math.floor(chip.y/cell)-1;
+  const cx1=Math.ceil((chip.x+chW)/cell)+1, cy1=Math.ceil((chip.y+chH)/cell)+1;
+  for(let gx=cx0;gx<=cx1;gx++)for(let gy=cy0;gy<=cy1;gy++)occ.add(key(gx,gy));
+
+  /* ---- components ---- */
+  const place=(wc,hc)=>{
+    for(let tr=0;tr<60;tr++){
+      const gx=1+(rnd()*(cols-wc-2)|0), gy=1+(rnd()*(rows-hc-2)|0);
+      let free=true;
+      for(let a=gx-1;a<=gx+wc&&free;a++)for(let b=gy-1;b<=gy+hc&&free;b++)
+        if(occ.has(key(a,b)))free=false;
+      if(!free)continue;
+      for(let a=gx;a<gx+wc;a++)for(let b=gy;b<gy+hc;b++)occ.add(key(a,b));
+      return {gx,gy};
+    }
+    return null;
+  };
+  const NC=34;
+  for(let i=0;i<NC;i++){
+    const roll=rnd();
+    const type=roll<.42?"ic":roll<.78?"res":"cap";
+    const wc=type==="ic"?4+(rnd()*3|0):type==="res"?1:2;
+    const hc=type==="ic"?3+(rnd()*2|0):type==="res"?3+(rnd()*3|0):2;
+    const spot=place(wc,hc);
+    if(!spot)continue;
+    comps.push({type,gx:spot.gx,gy:spot.gy,wc,hc,
+      x:spot.gx*cell,y:spot.gy*cell,w:wc*cell,h:hc*cell,
+      glow:0,amber:rnd()<.18,out:[]});
+  }
+
+  /* ---- traces from the chip pins (the heart pumps outward) ---- */
+  const pinsPerSide=Math.max(6,Math.round(chH/cell)+2);
+  chip.pins=[];
+  const addPinTraces=(side)=>{
+    const n=side<2?pinsPerSide:6;
+    for(let i=0;i<n;i++){
+      let gx,gy,dir;
+      if(side===0){gx=cx0;gy=cy0+2+(rnd()*(cy1-cy0-3)|0);dir=4}
+      else if(side===1){gx=cx1;gy=cy0+2+(rnd()*(cy1-cy0-3)|0);dir=0}
+      else if(side===2){gx=cx0+2+(rnd()*(cx1-cx0-3)|0);gy=cy0;dir=6}
+      else{gx=cx0+2+(rnd()*(cx1-cx0-3)|0);gy=cy1;dir=2}
+      const t=route(gx,gy,dir);
+      if(t){t.chip=true;t.amber=rnd()<.15;traces.push(t);
+        chip.pins.push({side,gx,gy});}
+    }
+  };
+  addPinTraces(0);addPinTraces(1);addPinTraces(2);addPinTraces(3);
+
+  /* ---- background traces all over the board ---- */
+  for(let i=0;i<130;i++){
+    const gx=1+(rnd()*(cols-2)|0), gy=1+(rnd()*(rows-2)|0);
+    if(occ.has(key(gx,gy)))continue;
+    occ.add(key(gx,gy));
+    const t=route(gx,gy,[0,2,4,6][rnd()*4|0]);
+    if(t){t.chip=false;t.amber=rnd()<.18;traces.push(t)}
+  }
+
+  /* ---- bind trace ends to nearby components (signals light them up) ---- */
+  traces.forEach((t,ti)=>{
+    let best=-1,bd=1e9;
+    comps.forEach((c,ci)=>{
+      const dx=Math.max(c.gx-t.end[0],0,t.end[0]-(c.gx+c.wc-1));
+      const dy=Math.max(c.gy-t.end[1],0,t.end[1]-(c.gy+c.hc-1));
+      const d=dx*dx+dy*dy;
+      if(d<bd){bd=d;best=ci}
+    });
+    t.endComp=(bd<=9)?best:-1;
+    // outgoing: trace whose START sits near this component
+    comps.forEach((c,ci)=>{
+      const dx=Math.max(c.gx-t.start[0],0,t.start[0]-(c.gx+c.wc-1));
+      const dy=Math.max(c.gy-t.start[1],0,t.start[1]-(c.gy+c.hc-1));
+      if(dx*dx+dy*dy<=9)c.out.push(ti);
+    });
+  });
+
+  /* decorative layers + culling boxes — generated once, drawn by drawWorld */
+  deco={zones:[],labels:[],crosses:[]};
+  const rz=mulberry32(seed+55);
+  for(let i=0;i<6;i++){
+    const zw=W*(0.12+rz()*.2), zh=H*(0.12+rz()*.22);
+    deco.zones.push({x:rz()*(W-zw),y:rz()*(H-zh),w:zw,h:zh});
+  }
+  const rl=mulberry32(seed+77);
+  for(let i=0;i<46;i++){
+    const lt=["R","C","U","Q","L","JP"][rl()*6|0]+(1+(rl()*98|0));
+    const lx=rl()*W, ly=rl()*H, rot=rl()<.4;
+    deco.labels.push({t:lt,x:lx,y:ly,rot});
+  }
+  for(let i=0;i<14;i++)deco.crosses.push({x:rl()*W,y:rl()*H});
+  traces.forEach(t=>{
+    let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
+    t.pts.forEach(p=>{if(p[0]<x0)x0=p[0];if(p[0]>x1)x1=p[0];if(p[1]<y0)y0=p[1];if(p[1]>y1)y1=p[1]});
+    t.bb=[x0-8,y0-8,x1+8,y1+8];
+  });
+
+  glowSprites={};
+  [GREEN,AMBER,...SPEAK_COLS].forEach(hx=>{
+    if(!glowSprites[hx]){
+      const[r,g,b]=hex2rgb(hx);
+      glowSprites[hx]=makeGlow(`rgb(${r},${g},${b})`,64);
+    }
+  });
+  glowSprites.green=glowSprites[GREEN];
+  glowSprites.amber=glowSprites[AMBER];
+  glowSprites.white=makeGlow("rgb(220,255,235)",64);
+  renderBG();
+}
+
+/* ---------------- the board, drawn as vectors ----------------
+   ONE code path for both worlds: renderBG() bakes it once for normal mode;
+   the live cinematic camera calls it per-frame with a culled view rect so
+   the macro shots stay infinitely crisp. sf scales the shadow params
+   (canvas shadows live in device space, so they must scale with the zoom). */
+function drawWorld(g,v,sf){
+  const[vx0,vy0,vx1,vy1]=v;
+  const hit=(x0,y0,x1,y1)=>x1>=vx0&&x0<=vx1&&y1>=vy0&&y0<=vy1;
+  // substrate
+  const grd=g.createRadialGradient(W/2,H/2,0,W/2,H/2,Math.max(W,H)*.72);
+  grd.addColorStop(0,"#07160e");grd.addColorStop(.55,"#04100a");grd.addColorStop(1,"#020705");
+  g.fillStyle=grd;g.fillRect(vx0,vy0,vx1-vx0,vy1-vy0);
+  // FR4 fiberglass weave — soft-light composite so the darks stay moody
+  g.save();
+  g.globalCompositeOperation="soft-light";
+  const wv=Math.max(5,Math.round(cell*.3));
+  g.strokeStyle="rgba(190,255,220,.10)";g.lineWidth=1;
+  g.beginPath();
+  for(let x=Math.floor(vx0/wv)*wv;x<=vx1;x+=wv){g.moveTo(x,vy0);g.lineTo(x,vy1)}
+  for(let y=Math.floor(vy0/wv)*wv;y<=vy1;y+=wv){g.moveTo(vx0,y);g.lineTo(vx1,y)}
+  g.stroke();
+  g.restore();
+  // drill-grid dots
+  g.fillStyle="rgba(61,220,132,.045)";
+  const d0=cell*2, ds=cell*4;
+  for(let xi=Math.max(0,Math.ceil((vx0-d0)/ds));d0+xi*ds<Math.min(W,vx1+2);xi++)
+    for(let yi=Math.max(0,Math.ceil((vy0-d0)/ds));d0+yi*ds<Math.min(H,vy1+2);yi++)
+      g.fillRect(d0+xi*ds-1,d0+yi*ds-1,2,2);
+  // ground-plane zones
+  deco.zones.forEach(z=>{
+    if(!hit(z.x,z.y,z.x+z.w,z.y+z.h))return;
+    g.fillStyle="rgba(61,220,132,.03)";
+    g.strokeStyle="rgba(61,220,132,.06)";g.lineWidth=1;
+    g.beginPath();g.roundRect(z.x,z.y,z.w,z.h,12);g.fill();g.stroke();
+  });
+  // silkscreen labels + alignment crosses
+  g.font=`${Math.round(cell*.5)}px ${getComputedStyle(document.body).fontFamily}`;
+  deco.labels.forEach(L=>{
+    if(!hit(L.x-80,L.y-80,L.x+80,L.y+80))return;
+    g.save();
+    g.translate(L.x,L.y);
+    if(L.rot)g.rotate(-Math.PI/2);
+    g.fillStyle="rgba(120,220,170,.10)";
+    g.fillText(L.t,0,0);
+    g.restore();
+  });
+  g.strokeStyle="rgba(120,220,170,.08)";g.lineWidth=1;
+  deco.crosses.forEach(cr=>{
+    const s=cell*.6;
+    if(!hit(cr.x-s,cr.y-s,cr.x+s,cr.y+s))return;
+    g.beginPath();g.moveTo(cr.x-s,cr.y);g.lineTo(cr.x+s,cr.y);g.moveTo(cr.x,cr.y-s);g.lineTo(cr.x,cr.y+s);g.stroke();
+    g.beginPath();g.arc(cr.x,cr.y,s*.45,0,6.29);g.stroke();
+  });
+  // unlit traces: raised copper under the mask — shadow low-right, light up-left
+  g.lineCap="round";g.lineJoin="round";
+  const tlw=Math.max(1.4,cell*.09);
+  traces.forEach(t=>{
+    if(!hit(t.bb[0],t.bb[1],t.bb[2],t.bb[3]))return;
+    const path=()=>{g.beginPath();g.moveTo(t.pts[0][0],t.pts[0][1]);
+      for(let i=1;i<t.pts.length;i++)g.lineTo(t.pts[i][0],t.pts[i][1])};
+    g.save();g.translate(1.1,1.4);path();
+    g.strokeStyle="rgba(0,0,0,.30)";g.lineWidth=tlw+.6;g.stroke();g.restore();
+    path();
+    g.strokeStyle=t.amber?"rgba(231,195,104,.15)":"rgba(61,220,132,.17)";
+    g.lineWidth=tlw;g.stroke();
+    g.save();g.translate(-.7,-.9);path();
+    g.strokeStyle=t.amber?"rgba(255,236,180,.05)":"rgba(190,255,220,.055)";
+    g.lineWidth=Math.max(1,tlw*.45);g.stroke();g.restore();
+    // vias at both ends — drilled pads, rim lit from the upper-left
+    [t.pts[0],t.pts[t.pts.length-1]].forEach(p=>{
+      const vR=Math.max(2.6,cell*.14);
+      g.beginPath();g.arc(p[0]+.8,p[1]+1,vR,0,6.29);
+      g.strokeStyle="rgba(0,0,0,.32)";g.lineWidth=1.6;g.stroke();
+      g.beginPath();g.arc(p[0],p[1],vR,0,6.29);
+      g.strokeStyle="rgba(120,220,170,.22)";g.lineWidth=1.4;g.stroke();
+      g.beginPath();g.arc(p[0],p[1],vR,Math.PI*.75,Math.PI*1.45);
+      g.strokeStyle="rgba(210,255,230,.30)";g.lineWidth=1.1;g.stroke();
+      g.fillStyle="rgba(1,4,3,.95)";
+      g.beginPath();g.arc(p[0],p[1],Math.max(1.2,cell*.06),0,6.29);g.fill();
+    });
+  });
+  // component bodies — ONE light source (upper-left): cast shadows on the
+  // substrate, lit top faces, dark walls low-right; taller parts = longer shadows
+  comps.forEach(c=>{
+    const col=c.amber?AMBER:GREEN;
+    const hgt=c.type==="ic"?1:c.type==="cap"?.75:.5;
+    const shx=4.5*hgt+1, shy=6.5*hgt+1.5, shb=9*hgt+4;
+    if(!hit(c.x-8,c.y-8,c.x+c.w+shx+shb+8,c.y+c.h+shy+shb+8))return;
+    if(c.type==="ic"){
+      const bx=c.x+cell*.3,by=c.y+cell*.3,bw=c.w-cell*.6,bh=c.h-cell*.6;
+      // metallic pins (under the body edges)
+      const np=Math.max(3,c.wc*2-2);
+      for(let i=0;i<np;i++){
+        const px=c.x+cell*.5+(c.w-cell)*(i/(np-1));
+        let pg=g.createLinearGradient(0,c.y,0,c.y+cell*.3);
+        pg.addColorStop(0,"rgba(200,235,215,.32)");pg.addColorStop(1,"rgba(70,110,90,.20)");
+        g.fillStyle=pg;g.fillRect(px-1.5,c.y+cell*.02,3,cell*.26);
+        pg=g.createLinearGradient(0,c.y+c.h-cell*.28,0,c.y+c.h);
+        pg.addColorStop(0,"rgba(70,110,90,.20)");pg.addColorStop(1,"rgba(150,200,175,.24)");
+        g.fillStyle=pg;g.fillRect(px-1.5,c.y+c.h-cell*.28,3,cell*.26);
+      }
+      // body + its cast shadow
+      g.save();
+      g.shadowColor="rgba(0,0,0,.55)";g.shadowBlur=shb*sf;g.shadowOffsetX=shx*sf;g.shadowOffsetY=shy*sf;
+      g.fillStyle="#050c08";
+      g.beginPath();g.roundRect(bx,by,bw,bh,3);g.fill();
+      g.restore();
+      // lit top face — stealth-black with just a whisper of directional light
+      const bg2=g.createLinearGradient(bx,by,bx+bw,by+bh);
+      bg2.addColorStop(0,"rgba(14,26,19,.94)");bg2.addColorStop(.45,"rgba(5,12,8,.94)");bg2.addColorStop(1,"rgba(2,6,4,.94)");
+      g.fillStyle=bg2;g.beginPath();g.roundRect(bx,by,bw,bh,3);g.fill();
+      // lit edge up-left, dark wall low-right, faint colored keyline
+      g.strokeStyle="rgba(190,255,220,.18)";g.lineWidth=1.2;
+      g.beginPath();g.moveTo(bx+2,by+bh-2);g.lineTo(bx+2,by+2);g.lineTo(bx+bw-2,by+2);g.stroke();
+      g.strokeStyle="rgba(0,0,0,.55)";g.lineWidth=1.6;
+      g.beginPath();g.moveTo(bx+bw-1,by+2);g.lineTo(bx+bw-1,by+bh-1);g.lineTo(bx+2,by+bh-1);g.stroke();
+      g.strokeStyle=rgba(col,.24);g.lineWidth=1;
+      g.beginPath();g.roundRect(bx,by,bw,bh,3);g.stroke();
+      g.fillStyle="rgba(120,220,170,.14)";
+      g.beginPath();g.arc(c.x+cell*.62,c.y+cell*.62,cell*.09,0,6.29);g.fill();
+    }else if(c.type==="res"){
+      for(let i=0;i<c.hc;i++){
+        const rx=c.x+cell*.12,ry=c.y+i*cell+cell*.22,rw=c.w-cell*.24,rh=cell*.56;
+        g.save();
+        g.shadowColor="rgba(0,0,0,.45)";g.shadowBlur=shb*sf;g.shadowOffsetX=shx*sf;g.shadowOffsetY=shy*sf;
+        g.fillStyle="#040a06";g.beginPath();g.roundRect(rx,ry,rw,rh,2);g.fill();
+        g.restore();
+        const rg2=g.createLinearGradient(rx,ry,rx,ry+rh);
+        rg2.addColorStop(0,"rgba(16,30,22,.94)");rg2.addColorStop(1,"rgba(3,8,5,.94)");
+        g.fillStyle=rg2;g.beginPath();g.roundRect(rx,ry,rw,rh,2);g.fill();
+        g.strokeStyle="rgba(190,255,220,.13)";g.lineWidth=1;
+        g.beginPath();g.moveTo(rx+1,ry+1);g.lineTo(rx+rw-1,ry+1);g.stroke();
+        g.strokeStyle=rgba(col,.22);g.lineWidth=1;
+        g.beginPath();g.roundRect(rx,ry,rw,rh,2);g.stroke();
+      }
+    }else{
+      const cxp=c.x+c.w/2,cyp=c.y+c.h/2,cr=c.w*.34;
+      g.save();
+      g.shadowColor="rgba(0,0,0,.5)";g.shadowBlur=shb*sf;g.shadowOffsetX=shx*sf;g.shadowOffsetY=shy*sf;
+      g.fillStyle="#040a06";g.beginPath();g.arc(cxp,cyp,cr,0,6.29);g.fill();
+      g.restore();
+      // dome: offset radial highlight = a real can capacitor
+      const dg=g.createRadialGradient(cxp-cr*.4,cyp-cr*.45,cr*.1,cxp,cyp,cr);
+      dg.addColorStop(0,"rgba(58,96,73,.95)");dg.addColorStop(.45,"rgba(14,28,19,.95)");dg.addColorStop(1,"rgba(2,6,4,.95)");
+      g.fillStyle=dg;g.beginPath();g.arc(cxp,cyp,cr,0,6.29);g.fill();
+      g.strokeStyle=rgba(col,.26);g.lineWidth=1.4;
+      g.beginPath();g.arc(cxp,cyp,cr,0,6.29);g.stroke();
+      g.fillStyle="rgba(220,255,235,.32)";
+      g.beginPath();g.arc(cxp-cr*.38,cyp-cr*.42,Math.max(1,cr*.14),0,6.29);g.fill();
+      g.strokeStyle="rgba(190,255,220,.18)";g.lineWidth=1.2;
+      g.beginPath();g.moveTo(cxp,cyp-cr*.5);g.lineTo(cxp,cyp+cr*.5);g.stroke();
+    }
+  });
+  // chip drawn dynamically every frame (it breathes/scales with the voice)
+}
+
+/* the baked layer for normal (un-zoomed) mode */
+function renderBG(){
+  bgLayer=document.createElement("canvas");bgLayer.width=W;bgLayer.height=H;
+  drawWorld(bgLayer.getContext("2d"),[0,0,W,H],1);
+}
+
+function drawChipBase(g){
+  const {x,y,w,h}=chip;
+  // pin stubs — metallic, same upper-left light as everything else
+  const npx=12;
+  for(let i=0;i<npx;i++){
+    const px=x+w*.08+w*.84*(i/(npx-1));
+    let pg=g.createLinearGradient(0,y-cell*.34,0,y);
+    pg.addColorStop(0,"rgba(210,240,220,.40)");pg.addColorStop(1,"rgba(90,130,108,.28)");
+    g.fillStyle=pg;g.fillRect(px-2,y-cell*.34,4,cell*.30);
+    pg=g.createLinearGradient(0,y+h,0,y+h+cell*.34);
+    pg.addColorStop(0,"rgba(90,130,108,.28)");pg.addColorStop(1,"rgba(170,210,190,.34)");
+    g.fillStyle=pg;g.fillRect(px-2,y+h+cell*.04,4,cell*.30);
+  }
+  const npy=5;
+  g.fillStyle="rgba(185,220,200,.32)";
+  for(let i=0;i<npy;i++){
+    const py=y+h*.14+h*.72*(i/(npy-1));
+    g.fillRect(x-cell*.34,py-2,cell*.30,4);
+    g.fillRect(x+w+cell*.04,py-2,cell*.30,4);
+  }
+  // body — the tallest part on the board, so the deepest cast shadow
+  // (shadows are device-space, so they scale with the cinematic zoom)
+  g.save();
+  g.shadowColor="rgba(0,0,0,.65)";g.shadowBlur=30*camZ;g.shadowOffsetX=12*camZ;g.shadowOffsetY=16*camZ;
+  g.fillStyle="#040a07";
+  g.beginPath();g.roundRect(x,y,w,h,6);g.fill();
+  g.restore();
+  // machined top: diagonal sheen off the upper-left light
+  const tg=g.createLinearGradient(x,y,x+w,y+h);
+  tg.addColorStop(0,"rgba(30,52,40,.5)");tg.addColorStop(.45,"rgba(6,13,9,0)");tg.addColorStop(1,"rgba(0,0,0,.25)");
+  g.fillStyle=tg;g.beginPath();g.roundRect(x,y,w,h,6);g.fill();
+  // edges: lit up-left, walled low-right, then the bevel pair
+  g.strokeStyle="rgba(150,235,185,.28)";g.lineWidth=1.6;
+  g.beginPath();g.moveTo(x+3,y+h-4);g.lineTo(x+3,y+3);g.lineTo(x+w-4,y+3);g.stroke();
+  g.strokeStyle="rgba(0,0,0,.6)";g.lineWidth=2.2;
+  g.beginPath();g.moveTo(x+w-2,y+4);g.lineTo(x+w-2,y+h-2);g.lineTo(x+4,y+h-2);g.stroke();
+  g.strokeStyle="#1e3a2b";g.lineWidth=2;
+  g.beginPath();g.roundRect(x,y,w,h,6);g.stroke();
+  g.strokeStyle="rgba(61,220,132,.20)";g.lineWidth=1;
+  g.beginPath();g.roundRect(x+5,y+5,w-10,h-10,4);g.stroke();
+  // corner dot (pin-1 marker)
+  g.fillStyle="rgba(61,220,132,.4)";
+  g.beginPath();g.arc(x+14,y+14,4,0,6.29);g.fill();
+}
+
+/* ---------------- HUD ---------------- */
+const $=id=>document.getElementById(id);
+function fmtClock(d){return String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0")+":"+String(d.getSeconds()).padStart(2,"0")}
+
+/* ---------------- pulses ---------------- */
+/* reversed trace geometry (lazy, cached once per trace) — inward travel */
+function revGeo(t){
+  if(!t.revg){
+    const pts=[...t.pts].reverse(),cum=[0];
+    for(let i=1;i<pts.length;i++)
+      cum.push(cum[i-1]+Math.hypot(pts[i][0]-pts[i-1][0],pts[i][1]-pts[i-1][1]));
+    t.revg={pts,cum,len:t.len,amber:t.amber,chip:t.chip};
+  }
+  return t.revg;
+}
+function spawnPulse(ti,inward){
+  const t=traces[ti];
+  // talking = the voice palette; listening = cool colors flowing INTO the chip
+  const col=speakingNowG?SPEAK_COLS[(rnd()*SPEAK_COLS.length)|0]
+           :inward?LISTEN_COLS[(rnd()*LISTEN_COLS.length)|0]:null;
+  pulses.push({t,geo:inward?revGeo(t):null,inward:!!inward,d:0,sp:R(.14,.26)*Math.min(W,H)/1000,col});
+}
+
+/* ---------------- the LIVE cinematic camera (Space) ----------------
+   A ~25s scripted flythrough rendered over the LIVE simulation — whatever
+   the board is doing (talking, listening, thinking) is what the lens sees.
+   Macro segments cut like an edit; the finale pulls back to the full wide
+   board. Space starts it, Space again bails out. Nothing is pre-rendered. */
+let cam={x:0,y:0,z:1}, cine=null, cineFade=0, camZ=1;
+function startCine(){
+  if(!traces.length||cine)return;
+  const pAt=(t,d)=>{let i=1;while(i<t.cum.length&&t.cum[i]<d)i++;i=Math.min(i,t.cum.length-1);
+    const seg=t.cum[i]-t.cum[i-1]||1,f=(d-t.cum[i-1])/seg;
+    return[t.pts[i-1][0]+(t.pts[i][0]-t.pts[i-1][0])*f,t.pts[i-1][1]+(t.pts[i][1]-t.pts[i-1][1])*f]};
+  // clamp a waypoint so the view mostly stays on the board
+  const cl=(x,y,z)=>({x:Math.max(W/z/2*.7,Math.min(W-W/z/2*.7,x)),
+                      y:Math.max(H/z/2*.7,Math.min(H-H/z/2*.7,y)),z});
+  const pick=a=>a[(rnd()*a.length)|0];
+  const dur=()=>4800+(rnd()*1800|0);
+  const ccx=chip.x+chip.w/2, ccy=chip.y+chip.h/2;
+  const byLen=[...traces].sort((a,b)=>b.len-a.len);
+  const ics=comps.filter(c=>c.type==="ic").sort((a,b)=>b.w*b.h-a.w*a.h);
+  const caps=comps.filter(c=>c.type==="cap");
+  /* the SHOT POOL — every run deals a fresh hand. Each shot travels at
+     constant speed with a randomized subject and direction. */
+  const POOL=[
+    ()=>{ // the trace highway — ride one of the five longest traces
+      const t=pick(byLen.slice(0,5)), rev=rnd()<.5;
+      const[ax,ay]=pAt(t,t.len*(rev?.8:.15)),[bx,by]=pAt(t,t.len*(rev?.15:.8));
+      return{d:dur(),f:cl(ax,ay,3.0),t:cl(bx,by,2.7)};
+    },
+    ()=>{ // the label slides through frame (the ONE chip shot)
+      const rev=rnd()<.5;
+      return{d:dur(),f:cl(chip.x+chip.w*(rev?.95:.05),ccy,2.9),
+             t:cl(chip.x+chip.w*(rev?.05:.95),ccy,2.6),chipShot:true};
+    },
+    ()=>{ // sweep across an IC quadrant
+      const ic=pick(ics.slice(0,3));if(!ic)return null;
+      const sx=rnd()<.5?1:-1, sy=rnd()<.5?1:-1;
+      const icx=ic.x+ic.w/2, icy=ic.y+ic.h/2;
+      return{d:dur(),f:cl(icx-sx*W*.16,icy-sy*H*.10,2.6),t:cl(icx+sx*W*.16,icy+sy*H*.10,2.5)};
+    },
+    ()=>{ // drift past a capacitor dome
+      const cp=pick(caps);if(!cp)return null;
+      const sx=rnd()<.5?1:-1;
+      const cpx=cp.x+cp.w/2, cpy=cp.y+cp.h/2;
+      return{d:dur(),f:cl(cpx-sx*W*.14,cpy+H*.06,3.1),t:cl(cpx+sx*W*.14,cpy-H*.06,2.9)};
+    },
+    ()=>{ // grand diagonal — corner region sweeping past center
+      const fx=rnd()<.5?W*.18:W*.82, fy=rnd()<.5?H*.18:H*.82;
+      const tx=fx<W/2?W*.66:W*.34, ty=fy<H/2?H*.66:H*.34;
+      return{d:dur(),f:cl(fx,fy,2.7),t:cl(tx,ty,2.5)};
+    },
+    ()=>{ // the edge run — skim along the top or bottom of the board
+      const y=(rnd()<.5?H*.14:H*.86), rev=rnd()<.5;
+      return{d:dur(),f:cl(rev?W*.8:W*.2,y,2.9),t:cl(rev?W*.2:W*.8,y,2.7)};
+    },
+    ()=>{ // vertical descent — truck down (or up) a random column
+      const x=W*(.25+rnd()*.5), rev=rnd()<.5;
+      return{d:dur(),f:cl(x,rev?H*.82:H*.18,2.8),t:cl(x,rev?H*.18:H*.82,2.6)};
+    },
+    ()=>{ // dolly push toward an IC — travel + zoom, never static
+      const ic=pick(ics);if(!ic)return null;
+      const icx=ic.x+ic.w/2, icy=ic.y+ic.h/2, sx=rnd()<.5?1:-1;
+      return{d:dur(),f:cl(icx-sx*W*.10,icy+H*.05,2.4),t:cl(icx+sx*W*.05,icy-H*.03,3.1)};
+    },
+  ];
+  // deal 4 shots; the chip shot may land anywhere EXCEPT last — it would
+  // jump-cut into the reveal, which also opens on the chip
+  const shots=[];
+  for(const gen of [...POOL].sort(()=>rnd()-.5)){
+    if(shots.length>=4)break;
+    const s=gen();if(s)shots.push(s);
+  }
+  // ONE screen-speed for the whole deck (one pan read faster) — duration
+  // derives from travel distance × zoom, so every drift feels the same to
+  // the eye, with just a whisper of variation
+  shots.forEach(s=>{
+    const zAvg=(s.f.z+s.t.z)/2;
+    const distS=Math.hypot(s.t.x-s.f.x,s.t.y-s.f.y)*zAvg;
+    s.d=Math.max(4300,Math.min(7800,(distS/.33)*(.92+rnd()*.16)));
+  });
+  const li=shots.findIndex(s=>s.chipShot);
+  if(li===shots.length-1&&shots.length>1){
+    const j=(rnd()*(shots.length-1))|0;
+    [shots[li],shots[j]]=[shots[j],shots[li]];
+  }
+  const segs=[...shots,
+    {d:6600,f:{x:ccx,y:ccy,z:2.3},t:{x:W/2,y:H/2,z:1},out:true}];  // the reveal, always the finale
+  cine={t:0,segs,total:segs.reduce((a,s)=>a+s.d,0)};
+  cv.style.transform="perspective(1100px) rotateX(16deg) scale(1.24)";  // tilted from frame one
+  document.body.classList.add("cine");
+}
+function endCine(){cine=null;cam={x:W/2,y:H/2,z:1};cv.style.transform="";document.body.classList.remove("cine")}
+function updateCine(dt){
+  cine.t+=dt;let t=cine.t;
+  for(const s of cine.segs){
+    if(t<=s.d){
+      const p=t/s.d;
+      const e=s.out?1-Math.pow(1-p,3):p;   // constant drift; the finale eases in to land
+      cam={x:s.f.x+(s.t.x-s.f.x)*e,y:s.f.y+(s.t.y-s.f.y)*e,z:s.f.z+(s.t.z-s.f.z)*e};
+      // the OBLIQUE camera: the board stays flat — the rendered plane tilts in
+      // true perspective (low flyover). The FIRST cut lands already tilted
+      // (easing in post-cut reads as a warp, not a move); it holds through
+      // every shot, then FLATTENS in sync with the pull-back.
+      const tilt=16*(s.out?(1-e):1);
+      cv.style.transform=tilt>.05
+        ?`perspective(1100px) rotateX(${tilt}deg) scale(${1+.24*(tilt/16)})`:"";
+      return;
+    }
+    t-=s.d;
+  }
+  endCine();
+}
+
+/* ---------------- per-frame ---------------- */
+function frame(dt){
+  AV.tick(dt);
+  now+=dt;
+  usageT+=dt; if(usageT>=1000){usageT=0;syncUsage();}
+  if(AV.state!==busPrev){busPrev=AV.state;syncHUD();
+    if(AV.demo&&AV.state==="thinking")echoT=0;
+    if(AV.demo&&AV.state==="idle"){echoT=-1;$("echo").innerHTML=""}}
+  const Et=targetEnergy();
+  const [tu,td]=easeTaus();
+  Ecur+=(Et-Ecur)*(1-Math.exp(-dt/(Et>Ecur?tu:td)));
+  const E=Ecur;
+
+  /* demo flavor: the typed command crawls in while the demo thinks */
+  if(echoT>=0){
+    echoT+=dt;
+    const shown=Math.min(COMMAND.length,Math.floor(echoT/34));
+    $("echo").innerHTML=COMMAND.slice(0,shown).replace(/</g,"&lt;")+'<span class="cur"></span>';
+  }
+  $("clock").textContent=fmtClock(new Date());
+
+  /* motion energy, state-aware: idle = a near-sleeping crawl,
+     talking = calm cruise, thinking = the full-speed storm */
+  const busS=AV.state;
+  const speakingNow=busS==="speaking";
+  speakingNowG=speakingNow;
+  lvlS+=(AV.level-lvlS)*(1-Math.exp(-dt/90));
+  talkS+=((speakingNow?1:0)-talkS)*(1-Math.exp(-dt/380));
+  const listeningNow=busS==="listening";
+  listenS+=((listeningNow?1:0)-listenS)*(1-Math.exp(-dt/380));
+  const thinkT=busS==="thinking";   // scramble eases in slow, RESOLVES fast
+  thinkS+=((thinkT?1:0)-thinkS)*(1-Math.exp(-dt/(thinkT?380:160)));
+  const ME=speakingNow?E*.38:listeningNow?E*.55:busS==="idle"?E*.2:E;
+
+  /* spawn: the chip is the heart — most pulses leave from it.
+     LISTENING reverses the flow: signals spawn at the far ends and
+     converge INWARD on the chip (steady, busier than idle). */
+  const cap=6+80*ME;
+  const tries=ME>.6?4:1;
+  for(let i=0;i<tries;i++)if(pulses.length<cap&&rnd()<(.05+.85*ME)){
+    const chipSide=rnd()<(listeningNow?.72:.62);
+    const pool=traces.map((t,idx)=>idx).filter(idx=>traces[idx].chip===chipSide);
+    if(pool.length)spawnPulse(pool[(rnd()*pool.length)|0],listeningNow);
+  }
+  /* cinematic traffic: while the camera runs, bias real signals onto the
+     traces in frame so the macro shots are never dead air */
+  if(cine&&pulses.length<cap+26&&rnd()<.38){
+    const cvw=W/cam.z/2+40, cvh=H/cam.z/2+40;
+    const inView=traces.map((t,idx)=>idx).filter(idx=>{const b=traces[idx].bb;
+      return b[2]>=cam.x-cvw&&b[0]<=cam.x+cvw&&b[3]>=cam.y-cvh&&b[1]<=cam.y+cvh});
+    if(inView.length)spawnPulse(inView[(rnd()*inView.length)|0],listeningNow);
+  }
+  /* idle life: components occasionally shimmer on their own */
+  if(rnd()<(.005+.05*ME)){
+    const c=comps[(rnd()*comps.length)|0];
+    if(c)c.glow=Math.max(c.glow,.3+.3*E);
+  }
+
+  /* ---- draw ---- */
+  if(cine)updateCine(dt);
+  cineFade+=((cine?1:0)-cineFade)*(1-Math.exp(-dt/450));
+  const camOn=!!cine;
+  camZ=camOn?cam.z:1;
+  ctx.clearRect(0,0,W,H);
+  ctx.save();
+  if(camOn){
+    // the live cinematic camera: same simulation, re-rendered as crisp
+    // vectors inside the culled view — macro shots never go soft
+    ctx.translate(W/2,H/2);ctx.scale(cam.z,cam.z);ctx.translate(-cam.x,-cam.y);
+    const vw=W/cam.z/2+60, vh=H/cam.z/2+60;
+    drawWorld(ctx,[cam.x-vw,cam.y-vh,cam.x+vw,cam.y+vh],cam.z);
+  }else ctx.drawImage(bgLayer,0,0);
+  ctx.globalCompositeOperation="lighter";
+
+  /* prismatic wash: the whole board shifts color while the agent talks */
+  if(talkS>.02){
+    const wa=(.05+.09*lvlS)*talkS;
+    let g1=ctx.createRadialGradient(W*.30,H*.34,0,W*.30,H*.34,W*.42);
+    g1.addColorStop(0,`rgba(53,224,255,${wa})`);g1.addColorStop(1,"rgba(0,0,0,0)");
+    ctx.fillStyle=g1;ctx.fillRect(0,0,W,H);
+    let g2=ctx.createRadialGradient(W*.72,H*.68,0,W*.72,H*.68,W*.44);
+    g2.addColorStop(0,`rgba(157,123,255,${wa*.9})`);g2.addColorStop(1,"rgba(0,0,0,0)");
+    ctx.fillStyle=g2;ctx.fillRect(0,0,W,H);
+    let g3=ctx.createRadialGradient(W*.52,H*.20,0,W*.52,H*.20,W*.36);
+    g3.addColorStop(0,`rgba(255,77,157,${wa*.6})`);g3.addColorStop(1,"rgba(0,0,0,0)");
+    ctx.fillStyle=g3;ctx.fillRect(0,0,W,H);
+  }
+
+  /* pulses: comet heads with tails, riding the traces */
+  const tailLen=Math.min(W,H)*(.10+.13*ME);
+  const speedK=.55+4.85*ME;
+  pulses=pulses.filter(p=>{
+    p.d+=p.sp*dt*speedK;
+    const t=p.geo||p.t;   // reversed geometry for inward pulses
+    const base=p.col||(t.amber?AMBER:GREEN);
+    if(p.d>=t.len+tailLen){
+      // arrival: inward signals feed the chip; outward light the component + chain
+      if(p.inward){
+        if(t.chip)chip.glowIn=Math.min(1,chip.glowIn+.45);
+      }else if(p.t.endComp>=0){
+        const c=comps[p.t.endComp];
+        c.glow=1;c.flashCol=base;
+        if(pulses.length<cap)c.out.forEach(oi=>{if(rnd()<.4)spawnPulse(oi)});
+      }
+      return false;
+    }
+    const col=p.col?p.col:(t.amber?AMBER_HOT:GREEN_HOT);
+    // tail segments
+    const head=Math.min(p.d,t.len);
+    let i=1;
+    while(i<t.cum.length&&t.cum[i]<p.d-tailLen)i++;
+    for(;i<t.cum.length&&t.cum[i-1]<head;i++){
+      const s0=Math.max(t.cum[i-1],p.d-tailLen), s1=Math.min(t.cum[i],head);
+      if(s1<=s0)continue;
+      const seg=t.cum[i]-t.cum[i-1]||1;
+      const f0=(s0-t.cum[i-1])/seg, f1=(s1-t.cum[i-1])/seg;
+      const ax=t.pts[i-1][0]+(t.pts[i][0]-t.pts[i-1][0])*f0;
+      const ay=t.pts[i-1][1]+(t.pts[i][1]-t.pts[i-1][1])*f0;
+      const bx=t.pts[i-1][0]+(t.pts[i][0]-t.pts[i-1][0])*f1;
+      const by=t.pts[i-1][1]+(t.pts[i][1]-t.pts[i-1][1])*f1;
+      const mid=(s0+s1)/2, back=(p.d-mid)/tailLen;
+      const a=Math.pow(Math.max(0,1-back),1.6)*(.45+.5*E);
+      ctx.strokeStyle=rgba(base,a);
+      ctx.lineWidth=Math.max(1.6,cell*.11)*(1+.5*(1-back));
+      ctx.beginPath();ctx.moveTo(ax,ay);ctx.lineTo(bx,by);ctx.stroke();
+    }
+    // head
+    if(p.d<=t.len){
+      let j=1;while(j<t.cum.length&&t.cum[j]<p.d)j++;
+      if(j<t.cum.length){
+        const seg=t.cum[j]-t.cum[j-1]||1, f=(p.d-t.cum[j-1])/seg;
+        const hx=t.pts[j-1][0]+(t.pts[j][0]-t.pts[j-1][0])*f;
+        const hy=t.pts[j-1][1]+(t.pts[j][1]-t.pts[j-1][1])*f;
+        const hs=(9+9*E);
+        ctx.globalAlpha=.75+.25*E;
+        ctx.drawImage(glowSprites[base]||glowSprites.green,hx-hs/2,hy-hs/2,hs,hs);
+        ctx.globalAlpha=1;
+        ctx.fillStyle=col;
+        ctx.beginPath();ctx.arc(hx,hy,Math.max(1.2,cell*.06),0,6.29);ctx.fill();
+      }
+    }
+    return true;
+  });
+
+  /* component flashes — colored by whatever signal hit them */
+  comps.forEach(c=>{
+    if(c.glow<=.02){c.glow=0;c.flashCol=null;return}
+    const col=c.flashCol||(c.amber?AMBER:GREEN);
+    const gsp=glowSprites[col]||glowSprites.green;
+    const cxp=c.x+c.w/2, cyp=c.y+c.h/2;
+    const s=Math.max(c.w,c.h)*(2.2+.8*E);
+    ctx.globalAlpha=.45*c.glow;
+    ctx.drawImage(gsp,cxp-s/2,cyp-s/2,s,s);
+    ctx.globalAlpha=1;
+    ctx.strokeStyle=rgba(col,.25+.65*c.glow);
+    ctx.lineWidth=1.6;
+    if(c.type==="cap"){ctx.beginPath();ctx.arc(cxp,cyp,c.w*.34,0,6.29);ctx.stroke()}
+    else{ctx.beginPath();ctx.roundRect(c.x+cell*.3,c.y+cell*.3,c.w-cell*.6,c.h-cell*.6,3);ctx.stroke()}
+    c.glow*=Math.exp(-dt/480);
+  });
+
+  /* the chip: beating heart of the board — breathes at idle, physically
+     swells with the voice while speaking, emits sound-wave rings */
+  {
+    const {x,y,w,h}=chip;
+    const talk=speakingNow?lvlS:0;
+    chip.glowIn*=Math.exp(-dt/420);   // fed by arriving inward signals, decays fast
+    const scale=1+.012*Math.sin(now/620)+.05*talk+.018*E+.02*chip.glowIn;
+    const ccx=x+w/2, ccy=y+h/2;
+    ctx.save();
+    ctx.translate(ccx,ccy);ctx.scale(scale,scale);ctx.translate(-ccx,-ccy);
+    const breathe=.5+.5*Math.sin(now/1100);
+    // the heart: amber, two layers, breathing hard — crossfades COOL while listening
+    const cool=glowSprites[LISTEN_COOL];
+    const cg=Math.min(1,(.22+.55*E)+.14*breathe+.3*talk+.3*chip.glowIn);
+    const s=w*(1.7+.6*E+.45*talk+.2*chip.glowIn);
+    ctx.globalAlpha=cg*(1-.85*listenS);
+    ctx.drawImage(glowSprites.amber,ccx-s/2,ccy-(s*.62)/2,s,s*.62);
+    if(listenS>.02){ctx.globalAlpha=cg*.9*listenS;
+      ctx.drawImage(cool,ccx-s/2,ccy-(s*.62)/2,s,s*.62);}
+    const cg2=Math.min(1,(.2+.42*E)+.14*breathe+.35*talk+.3*chip.glowIn);
+    const s2=w*(.85+.3*E+.3*talk+.15*chip.glowIn);
+    ctx.globalAlpha=cg2*(1-.85*listenS);
+    ctx.drawImage(glowSprites.amber,ccx-s2/2,ccy-(s2*.62)/2,s2,s2*.62);
+    if(listenS>.02){ctx.globalAlpha=cg2*.9*listenS;
+      ctx.drawImage(cool,ccx-s2/2,ccy-(s2*.62)/2,s2,s2*.62);}
+    ctx.globalAlpha=1;
+    ctx.globalCompositeOperation="source-over";
+    drawChipBase(ctx);
+    // label — the agent's name at rest, glow throbs with the voice; while
+    // LISTENING each letter rides, stretches, and MELTS into a living waveform
+    // (everything on the eased listenS — one continuous transform, no cuts)
+    const LBL=AV.label;
+    const fs=Math.round(h*.26);
+    ctx.font=`600 ${fs}px ${getComputedStyle(document.body).fontFamily}`;
+    ctx.textAlign="center";ctx.textBaseline="middle";
+    const sp=Math.round(fs*.38);
+    if(!chip.glyphs||chip.glyphFs!==fs||chip.glyphLbl!==LBL){   // per-glyph layout cache
+      const ws=[...LBL].map(c=>ctx.measureText(c).width);
+      const tot=ws.reduce((a,b)=>a+b,0)+sp*(LBL.length-1);
+      let gx0=-tot/2;
+      chip.glyphs=[...LBL].map((c,i)=>{const g={c,x:gx0+ws[i]/2};gx0+=ws[i]+sp;return g});
+      chip.glyphFs=fs;chip.glyphLbl=LBL;
+    }
+    const inL=x+w*.06, inR=x+w-w*.06;             // wave span inside the die
+    const wave=(px,t)=>{                          // layered drifting sines, edge-pinned
+      const u=Math.min(1,Math.max(0,(px-inL)/(inR-inL)));
+      return Math.sin(Math.PI*u)*(Math.sin(u*11.5+t*3.1)*.55+Math.sin(u*23-t*4.7)*.3+Math.sin(u*5.2+t*1.9)*.45);
+    };
+    const amp=h*.30*listenS, tw=now/1000;
+    const lum=Math.min(255,140+80*E+70*talk|0);
+    const baseA=Math.min(1,.82+.18*E+.1*talk);
+    ctx.shadowColor=rgba(GREEN,Math.min(1,.55+.4*E+.3*talk));
+    ctx.shadowBlur=14+26*E+30*talk;
+    const nG=chip.glyphs.length-1;
+    const scrTick=(now/70)|0;   // scramble churn: new random glyphs ~14x/sec
+    chip.glyphs.forEach((g,i)=>{
+      const melt=Math.min(1,Math.max(0,listenS*1.35-(i/nG)*.3));   // evolves left→right
+      const a=baseA*(1-Math.min(1,Math.max(0,(melt-.45)/.4)));     // letters fade late
+      if(a<=.01)return;
+      // THINKING: the label scrambles matrix-style — per-glyph dithered by the
+      // eased thinkS (flickers in, full churn at peak, flickers back out)
+      let ch=g.c;
+      if(thinkS>.02){
+        let h2=((i+1)*2654435761)^(scrTick*2246822519);
+        h2=(h2^(h2>>>13))>>>0;
+        const scr=Math.min(1,Math.max(0,thinkS*1.35-(i/nG)*.3));
+        if((h2%1000)/1000<scr)ch=SCRAM[h2%SCRAM.length];
+      }
+      const gx=ccx+g.x, gy=ccy+1+wave(gx,tw)*amp*melt;             // rides the forming wave
+      ctx.save();
+      ctx.translate(gx,gy);
+      ctx.scale(1-.25*melt,1+1.7*melt);                            // pulled INTO the line
+      ctx.fillStyle=`rgba(${lum},255,${Math.min(255,190+30*E+40*talk|0)},${a})`;
+      ctx.fillText(ch,0,0);
+      ctx.restore();
+    });
+    ctx.shadowBlur=0;
+    // the waveform itself — brightens beneath the melting letters
+    if(listenS>.03){
+      const wA=Math.min(1,Math.max(0,(listenS-.2)/.6));
+      ctx.save();
+      ctx.beginPath();ctx.roundRect(x+5,y+5,w-10,h-10,4);ctx.clip();
+      for(const[lwid,aa]of[[Math.max(2,fs*.16),.28*wA],[Math.max(1.2,fs*.07),.9*wA]]){
+        ctx.strokeStyle=rgba(LISTEN_COOL,aa);
+        ctx.lineWidth=lwid;ctx.lineCap="round";ctx.lineJoin="round";
+        ctx.beginPath();
+        for(let sI=0;sI<=64;sI++){
+          const px=inL+(inR-inL)*sI/64;
+          const py=ccy+1+wave(px,tw)*amp;
+          sI?ctx.lineTo(px,py):ctx.moveTo(px,py);
+        }
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+    // shimmer band sweeping the die while working
+    if(E>.45){
+      ctx.save();ctx.beginPath();ctx.roundRect(x+5,y+5,w-10,h-10,4);ctx.clip();
+      const bx=x+((now/900)%2)*w-w*.5;
+      const bg2=ctx.createLinearGradient(bx,0,bx+w*.4,0);
+      bg2.addColorStop(0,"rgba(61,220,132,0)");
+      bg2.addColorStop(.5,`rgba(61,220,132,${.10*(E-.45)/.55})`);
+      bg2.addColorStop(1,"rgba(61,220,132,0)");
+      ctx.fillStyle=bg2;ctx.fillRect(x,y,w,h);
+      ctx.restore();
+    }
+    ctx.restore();
+    // sound-wave rings: ripple OFF the chip while the agent talks,
+    // CONTRACT ONTO the die while listening (the chip pulling the sound in)
+    ctx.globalCompositeOperation="lighter";
+    if(speakingNow&&now-lastRing>300&&lvlS>.16){
+      rings.push({t:0,col:SPEAK_COLS[(rnd()*SPEAK_COLS.length)|0]});lastRing=now}
+    if(listeningNow&&now-lastRing>480){
+      rings.push({t:0,col:LISTEN_COLS[(rnd()*LISTEN_COLS.length)|0],inw:true});lastRing=now}
+    rings=rings.filter(rg=>{
+      rg.t+=dt;const ph=rg.t/(rg.inw?1100:950);
+      if(ph>=1){
+        if(rg.inw)chip.glowIn=Math.min(1,chip.glowIn+.25);   // the ring lands
+        return false;
+      }
+      const pad=rg.inw?(1-ph)*cell*4.6:ph*cell*3.6;
+      const a=rg.inw?ph*ph*(.20+.22*listenS):(1-ph)*(.28+.3*lvlS);
+      ctx.strokeStyle=rgba(rg.col||GREEN,a);ctx.lineWidth=rg.inw?1.6:2;
+      ctx.beginPath();ctx.roundRect(x-pad,y-pad,w+pad*2,h+pad*2,8+pad*.4);ctx.stroke();
+      return true;
+    });
+  }
+
+  ctx.restore();   // camera off — everything below is screen-space post
+
+  /* roaming specular sheen — the light breathing across the lens */
+  {
+    const swp=(now/26000)%1.3-.15;
+    const gs=ctx.createLinearGradient(W*(swp-.22),H*.1,W*(swp+.22),H*.9);
+    gs.addColorStop(0,"rgba(180,255,215,0)");
+    gs.addColorStop(.5,"rgba(180,255,215,.045)");
+    gs.addColorStop(1,"rgba(180,255,215,0)");
+    ctx.fillStyle=gs;ctx.fillRect(0,0,W,H);
+  }
+  /* living film grain — soft-light keeps the blacks moody */
+  {
+    if(!grainPat){
+      grainTile=document.createElement("canvas");grainTile.width=grainTile.height=128;
+      const ng=grainTile.getContext("2d"),idd=ng.createImageData(128,128);
+      const rn=mulberry32(seed+99);
+      for(let i=0;i<idd.data.length;i+=4){const v=rn()*255|0;idd.data[i]=idd.data[i+1]=idd.data[i+2]=v;idd.data[i+3]=46}
+      ng.putImageData(idd,0,0);
+      grainPat=ctx.createPattern(grainTile,"repeat");
+    }
+    ctx.save();
+    ctx.globalCompositeOperation="soft-light";
+    ctx.translate(-(((now/47)|0)%3)*43,-(((now/61)|0)%3)*57);
+    ctx.fillStyle=grainPat;ctx.fillRect(0,0,W+130,H+130);
+    ctx.restore();
+  }
+  /* drifting crosshair (HUD garnish — hides while the camera runs) */
+  if(cineFade<.4){
+    const chx=W*.80+Math.sin(now/5000)*12, chy=H*.30+Math.cos(now/4200)*16;
+    ctx.strokeStyle=`rgba(220,245,230,${.5*(1-cineFade/.4)})`;ctx.lineWidth=1;
+    ctx.beginPath();ctx.moveTo(chx-7,chy);ctx.lineTo(chx+7,chy);ctx.moveTo(chx,chy-7);ctx.lineTo(chx,chy+7);ctx.stroke();
+  }
+}
+
+/* ---------------- boot / loop ---------------- */
+function resize(){
+  if(cine)endCine();
+  DPR=Math.min(window.devicePixelRatio||1,1.25);
+  W=cv.width=innerWidth*DPR;H=cv.height=innerHeight*DPR;
+  cv.style.width=innerWidth+"px";cv.style.height=innerHeight+"px";
+  buildBoard();
+  cam={x:W/2,y:H/2,z:1};
+  // shot harness: the late headless resize must RESTART the cine, not kill it
+  if(SHOT&&Q.get("cine")==="1")startCine();
+}
+window.addEventListener("resize",resize);
+resize();
+
+/* fps meter (?fps=1) */
+let fpsEl=null,fpsAcc=0,fpsN=0;
+function fpsToggle(on){
+  if(on&&!fpsEl){fpsEl=document.createElement("div");
+    fpsEl.style.cssText="position:fixed;bottom:64px;right:56px;z-index:40;font:11px "+
+      "'SF Mono',Menlo,monospace;letter-spacing:.2em;color:#5a6a72";
+    document.body.appendChild(fpsEl);}
+  if(fpsEl)fpsEl.style.display=on?"block":"none";
+  fpsEl&&(fpsEl.dataset.on=on?"1":"");
+}
+if(Q.get("fps")==="1")fpsToggle(true);
+
+addEventListener("keydown",e=>{
+  if(e.code==="Space"){e.preventDefault();cine?endCine():startCine();}
+  if(e.key==="c"||e.key==="C"){cine?endCine():startCine();}
+  if(e.key==="f"||e.key==="F"){
+    document.fullscreenElement?document.exitFullscreen()
+      :document.documentElement.requestFullscreen();
+  }
+});
+
+if(SHOT){
+  if(Q.get("cine")==="1")startCine();
+  AV.shotRun(frame);
+}else{
+  let last=performance.now();
+  function loop(ts){
+    const dt=Math.min(50,ts-last);last=ts;
+    frame(dt);
+    if(fpsEl&&fpsEl.dataset.on){fpsAcc+=dt;fpsN++;
+      if(fpsAcc>=500){fpsEl.textContent="FPS "+Math.round(1000/(fpsAcc/fpsN));fpsAcc=0;fpsN=0;}}
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+}
+</script>
+</body>
+</html>

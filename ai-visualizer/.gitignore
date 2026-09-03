@@ -1,0 +1,9 @@
+.DS_Store
+__pycache__/
+*.pyc
+.voice_state
+.voice_waveform
+.voice_loading_pid
+.voice_alert
+# your personal config, created at setup: never tracked, never touched by updates
+ai-visualizer.json

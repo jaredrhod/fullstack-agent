@@ -1,6 +1,6 @@
 #!/bin/bash
 # fullstack-agent: give your AI a full stack — memory, voice, face, hands.
-# Copyright (C) 2026 Jared Rhodenizer
+# Copyright (C) 2026 Akhil
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published

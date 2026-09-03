@@ -1,3 +1,26 @@
 .DS_Store
+Thumbs.db
 __pycache__/
-*.pyc
+*/__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+*/.venv/
+env/
+venv/
+ENV/
+
+# Python packaging
+*.egg-info/
+*/.egg-info/
+dist/
+build/
+
+# Runtime state and logs
+logs/
+*/logs/
+*.log
+.voice_*
+*/.voice_*

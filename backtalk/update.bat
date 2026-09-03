@@ -1,5 +1,5 @@
 @echo off
-rem fullstack-agent -- updating has moved. This script does nothing now.
+rem backtalk -- updating has moved. This script does nothing now.
 rem Copyright (C) 2026 Akhil
 rem SPDX-License-Identifier: AGPL-3.0-or-later
 rem
@@ -28,9 +28,9 @@ rem function and calls it at the very end, so bash reads the whole script
 rem into memory before running any of it. It never needed a copy of itself.
 rem
 rem If this folder has no .git yet because it arrived as a zip, an agent
-rem can wire it up once, keeping your config files:
+rem can wire it up once, keeping backtalk.json:
 rem   git init -b main
-rem   git remote add origin https://github.com/jaredrhod/fullstack-agent
+rem   git remote add origin https://github.com/jaredrhod/backtalk
 rem   git fetch origin
 rem   git reset --hard origin/main
 
@@ -39,7 +39,7 @@ echo   Updating has moved, and there is nothing here to run.
 echo.
 echo   Open a chat with your agent and say:
 echo.
-echo       update everything and tell me what changed
+echo       update backtalk and tell me what changed
 echo.
 echo   It does the same job, and it tells you what arrived.
 echo.

@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<!--
+ai-visualizer: give your AI agent a face.
+Copyright (C) 2026 Jared Rhodenizer
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published
+by the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+SPDX-License-Identifier: AGPL-3.0-or-later
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>ai-visualizer</title>
+<style>
+  :root{
+    --ink:#e8f0f2; --dim:#5a6a72; --green:#3ddc84; --amber:#e7c368;
+    --chrome:#1c2f26;
+    --mono:"SF Mono",Menlo,Consolas,monospace;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{width:100%;min-height:100%;background:#020705}
+  body{font-family:var(--mono);color:var(--ink);padding:56px 8vw 80px}
+  .corner{position:fixed;width:34px;height:34px;border:1px solid var(--chrome)}
+  .corner.tl{top:18px;left:18px;border-right:none;border-bottom:none}
+  .corner.tr{top:18px;right:18px;border-left:none;border-bottom:none}
+  .corner.bl{bottom:18px;left:18px;border-right:none;border-top:none}
+  .corner.br{bottom:18px;right:18px;border-left:none;border-top:none}
+  h1{font-size:clamp(18px,2vw,28px);letter-spacing:.5em;font-weight:normal;
+     text-shadow:0 0 14px rgba(120,255,190,.4)}
+  #sub{margin-top:10px;font-size:clamp(10px,.8vw,13px);letter-spacing:.28em;color:var(--dim)}
+  #sub b{color:var(--green);font-weight:normal}
+  #cards{margin-top:44px;display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:18px}
+  a.card{display:block;border:1px solid #12271c;background:#04100a;border-radius:6px;
+         padding:22px 24px;text-decoration:none;color:var(--ink);
+         transition:border-color .2s,box-shadow .2s;position:relative}
+  a.card:hover{border-color:var(--green);box-shadow:0 0 24px rgba(61,220,132,.15)}
+  .card .n{font-size:15px;letter-spacing:.3em;color:var(--green)}
+  .card .key{position:absolute;top:18px;right:20px;font-size:11px;color:var(--dim);
+             border:1px solid #1c2f26;border-radius:3px;padding:2px 7px}
+  .card .tag{margin-top:12px;font-size:12px;line-height:1.7;color:#9fb4ac}
+  .card .def{display:inline-block;margin-left:10px;font-size:9px;letter-spacing:.2em;
+             color:var(--amber);border:1px solid #4a3d1e;border-radius:3px;padding:2px 6px;
+             vertical-align:15%}
+  .card .demo{margin-top:14px;font-size:11px;letter-spacing:.2em;color:var(--dim)}
+  .card .demo:hover{color:var(--amber)}
+  #foot{margin-top:52px;font-size:11px;letter-spacing:.18em;color:var(--dim);line-height:2.1}
+  #foot b{color:#8fc4a8;font-weight:normal}
+</style>
+</head>
+<body>
+<div class="corner tl"></div><div class="corner tr"></div>
+<div class="corner bl"></div><div class="corner br"></div>
+
+<h1 id="title">AI-VISUALIZER</h1>
+<div id="sub">PICK YOUR AGENT'S FACE - <b id="who">JARVIS</b></div>
+<div id="cards"></div>
+<div id="foot">
+  Every face rides the same signal bus, so switching faces is just picking a different page.<br>
+  <b>DEMO</b> runs a face standalone on a scripted voice turn, no voice line needed.<br>
+  Keys inside a face: <b>F</b> fullscreen · board only: <b>SPACE</b> cinematic flythrough.
+</div>
+
+<script src="core.js"></script>
+<script>
+"use strict";
+const FALLBACK=[
+  {id:"board",title:"The Circuit Board",tagline:"A living PCB. Pulses stream the traces from the center chip; Space flies the cinematic camera through it."},
+  {id:"radial",title:"The Radial",tagline:"An 80-bar starburst around a living particle orb that detonates from the core with every syllable."},
+  {id:"rain",title:"Face in the Code",tagline:"Matrix rain, until the agent speaks and a face surfaces inside the glyphs."},
+  {id:"neural",title:"Neural Core",tagline:"A constellation brain: nine labeled color islands, a white crescent, traveling thought-pulses."},
+];
+let deflt="board";
+AV.init({sound:false});
+AV.ready(a=>{
+  document.getElementById("who").textContent=a.name.toUpperCase();
+  const faces=(a.faces&&a.faces.length)?a.faces:FALLBACK;
+  fetch("/config",{cache:"no-store"}).then(r=>r.json())
+    .then(c=>{deflt=c.face||"board";render(faces)})
+    .catch(()=>render(faces));
+});
+function render(faces){
+  const cards=document.getElementById("cards");
+  cards.innerHTML="";
+  faces.forEach((f,i)=>{
+    const a=document.createElement("a");
+    a.className="card";
+    a.href=`faces/${f.id}/index.html`;
+    a.innerHTML=`<span class="n">${f.title||f.id}</span>`+
+      (f.id===deflt?`<span class="def">DEFAULT</span>`:"")+
+      `<span class="key">${i+1}</span>`+
+      `<div class="tag">${f.tagline||""}</div>`+
+      `<div class="demo">&gt; watch the demo</div>`;
+    a.querySelector(".demo").addEventListener("click",e=>{
+      e.preventDefault();e.stopPropagation();
+      location.href=`faces/${f.id}/index.html?demo=1`;
+    });
+    cards.appendChild(a);
+    addEventListener("keydown",e=>{
+      if(e.key===String(i+1))location.href=`faces/${f.id}/index.html`;
+    });
+  });
+}
+</script>
+</body>
+</html>

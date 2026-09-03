@@ -1,0 +1,34 @@
+[project]
+name = "backtalk"
+version = "1.0.0"
+description = "June: talk to your local Ollama agent out loud. Hold a key, speak, and it answers in a real voice."
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "openai>=1.40.0",
+    "faster-whisper>=1.0.0",
+    "httpx>=0.27.0",
+    "kokoro>=0.9.0",
+    # Apple Silicon only: runs the SAME whisper model on the GPU.
+    # CTranslate2 (under faster-whisper) has no Metal backend, so
+    # without this every Mac transcribes on the CPU. Measured 0.88s
+    # -> 0.12s on an M4 Max with an identical transcript. Every other
+    # platform keeps faster-whisper, which already uses CUDA.
+    "mlx-whisper>=0.4.0 ; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "numpy>=1.26.0",
+    "pynput>=1.8.0",
+    "setuptools<81",
+    "sounddevice>=0.5.0",
+    "soundfile>=0.12.0",
+    # Windows has no compiler by default and upstream webrtcvad ships an
+    # sdist ONLY -- no wheels for any platform -- so uv tries to build it
+    # and dies demanding Visual C++ Build Tools. webrtcvad-wheels is the
+    # same code with binary wheels, importing as the identical module.
+    "webrtcvad>=2.0.10 ; sys_platform != 'win32'",
+    "webrtcvad-wheels>=2.0.10 ; sys_platform == 'win32'",
+]
+
+[tool.setuptools]
+packages = ["backtalk"]
+
+[tool.uv]
+package = false

@@ -1,0 +1,8 @@
+{
+  "name": "JARVIS",
+  "badge": "",
+  "face": "board",
+  "port": 8790,
+  "bus_dir": "",
+  "thinking_sound": true
+}

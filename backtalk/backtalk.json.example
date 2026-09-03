@@ -1,0 +1,7 @@
+{
+  "agent_dir": "~",
+  "name": "Assistant",
+  "ptt_key": "home",
+  "voice": "bm_lewis",
+  "stt_model": "small.en"
+}
