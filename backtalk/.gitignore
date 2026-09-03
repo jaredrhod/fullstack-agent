@@ -1,0 +1,24 @@
+.DS_Store
+__pycache__/
+*.pyc
+.venv/
+logs/
+# the signal bus, written at runtime. A GLOB and not a list: the list named
+# three files while the code wrote five, so .voice_reply_done and
+# .voice_direction left every user's repo permanently dirty after their first
+# conversation -- noisy forever, and enough to make an update script believe
+# they had local edits. An enumerated list goes stale the day the code grows.
+.voice_*
+uv.lock
+backtalk.egg-info/
+# your personal config, created at setup: never tracked, never touched by updates
+backtalk.json
+
+# Other agents' configs living beside this one. They are not backtalk's, they are
+# not the user's copy of backtalk's, and nothing here should ever carry them.
+earl.json
+show.json
+# A pinned interpreter version is this machine's, never the downloader's.
+.python-version
+# Config backups the setup wizard leaves behind.
+*.json.*.bak

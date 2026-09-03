@@ -1,0 +1,610 @@
+<!DOCTYPE html>
+<!--
+ai-visualizer: give your AI agent a face.
+Copyright (C) 2026 Jared Rhodenizer
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published
+by the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+SPDX-License-Identifier: AGPL-3.0-or-later
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Neural Core</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{width:100%;height:100%;background:#02030a;overflow:hidden;cursor:none}
+  canvas#stage{position:fixed;inset:0;width:100vw;height:100vh;display:block}
+</style>
+</head>
+<body>
+<canvas id="stage"></canvas>
+<script src="../../core.js"></script>
+<script>
+"use strict";
+/* ============================================================
+   NEURAL CORE  ·  the constellation brain
+   Separated saturated color islands meshed in their OWN hue,
+   the white crescent as the single bright element, a dim
+   interior head-mass, pale tendrils with dotted joints,
+   instrument chrome + a CORTEX STATUS panel wired to the real
+   states. Parallax drift + twinkle + breathing + traveling
+   dots — never still, never a storm. Color stays color (hard
+   brightness cap; only the crescent and the dots are white).
+   The one rendering rule: EVERYTHING that emits light is drawn
+   into ONE field canvas and the WHOLE field gets the bloom
+   pass — every line glows, nothing reads as pencil.
+
+   The four states are built to be legible from across a room,
+   not merely different in the math: each one moves the base
+   brightness, the colour cast, the drift speed, the dot traffic,
+   and which regions are hot.
+
+   idle       dim and slow, a stray thought-pulse now and then
+   listening  the whole field takes a COOL cast, the input side
+              (sensory, visual, brainstem) warms, drift eases
+   thinking   everything floods bright, the drift speeds up, and
+              a fast comet-tail sweep races the nine regions
+   speaking   the output side (language, prefrontal, motor,
+              association) rides the live voice envelope and the
+              crescent breathes with it
+   alert      everything bleeds red
+   Keys: F = fullscreen.
+   ============================================================ */
+
+const Q=new URLSearchParams(location.search);
+const SHOT=Q.get("shot");
+AV.init({mic:true});
+AV.ready(a=>{document.title=a.name+" Neural Core";});
+
+const U=AV.util;
+const BG="#02030a";
+const INK=[96,140,220], INK_BRIGHT=[170,210,255], WHITE=[235,242,255];
+const AMBER=[255,176,64], RED=[255,52,52], GREEN=[74,240,122], CYAN=[56,200,255];
+const dim=(c,f)=>U.dim(c,f);
+
+// Clusters: [label, cx, cy, spread, color, n]
+const CLUSTERS=[
+  ["PREFRONTAL",  .74,-.16,.11,[ 96,165,250],180],
+  ["MOTOR",       .30,-.44,.10,[ 52,211,153],165],
+  ["SENSORY",    -.06,-.50,.11,[255,150, 60],180],
+  ["ASSOCIATION", .38, .04,.13,[150,110,250],205],
+  ["LANGUAGE",    .10, .32,.10,[ 56,200,255],165],
+  ["VISUAL",     -.78,-.06,.11,[240, 80,120],180],
+  ["HIPPOCAMPUS",-.32, .26,.10,[250,200, 70],150],
+  ["CEREBELLUM", -.62, .36,.10,[110,230, 90],165],
+  ["BRAINSTEM",  -.16, .52,.08,[190,120,255],125],
+  [null,          .58,-.52,.07,[200,230, 90], 60],
+  [null,         -.46,-.38,.07,[255, 90, 80], 60],
+  [null,          .90, .24,.07,[255,140, 70], 55],
+  [null,        -1.00, .14,.07,[ 80,220,230], 55],
+  [null,          .02,-.14,.08,[120,170,255], 70],
+  [null,          .52, .40,.06,[255,120,190], 50],
+  [null,         -.40,-.58,.06,[140,240,200], 50],
+  [null,          .94,-.40,.06,[170,200,100], 45],
+  [null,         -.86, .42,.06,[255,190,120], 45],
+  // the dark head-mass: a wide, very dim interior scatter (no mesh)
+  [null,          .14, .00,.30,[ 60, 90,170],430],
+];
+const N_REGIONS=9;
+const CRESCENT_C=[-.16,-.03], CRESCENT_R=.30;
+const N_TENDRILS=46;
+// [traveling dots per second, base point brightness]. The spread here is
+// deliberately WIDE: the four states have to be legible from across a room,
+// not merely different in the math.
+const PROFILE={idle:[1.4,.38],listening:[2.6,.50],thinking:[13.0,.95],speaking:[9.0,.78]};
+const BRIGHT_CAP=1.18;                 // color can never clip to white
+const PANEL_ROWS=CLUSTERS.slice(0,N_REGIONS).map((c,i)=>[c[0],i])
+  .concat([["STT",null],["TTS",null],["MEMORY",null],["BUS",null]]);
+const MONO="13px 'SF Mono',Menlo,Consolas,monospace";
+const MONO_SM="11px 'SF Mono',Menlo,Consolas,monospace";
+const MONO_LG="bold 16px 'SF Mono',Menlo,Consolas,monospace";
+
+const cv=document.getElementById("stage"), ctx=cv.getContext("2d");
+let W=0,H=0,cx=0,cy=0,scalePx=0;
+let field=null,fg=null,buf=null,bufData=null,touched=null,touchedN=0;
+
+/* seeded rng so the anatomy is identical every boot */
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+const rng=mulberry32(7);
+const gauss=()=>{let u=0,v=0;while(!u)u=rng();while(!v)v=rng();
+  return Math.sqrt(-2*Math.log(u))*Math.cos(6.2831853*v);}
+
+/* ---------------- build the anatomy (once) ---------------- */
+let P=null;
+function build(){
+  const pts=[],cols=[],cidx=[];
+  CLUSTERS.forEach((cl,ci)=>{
+    const[,ccx,ccy,spread,hue,n]=cl;
+    const nCore=n*.7|0;
+    for(let i=0;i<n;i++){
+      const s=i<nCore?spread*.55:spread*1.25;
+      pts.push([ccx+gauss()*s,ccy+gauss()*s,gauss()*.10]);
+      const jit=.6+rng()*.4;
+      cols.push([hue[0]*jit,hue[1]*jit,hue[2]*jit]);
+      cidx.push(ci);
+    }
+  });
+  const N=pts.length;
+  const twPhase=new Float32Array(N),twSpeed=new Float32Array(N);
+  const shAmp=[],shFreq=new Float32Array(N),shPhase=[];
+  for(let i=0;i<N;i++){
+    twPhase[i]=rng()*6.2832;twSpeed[i]=.8+rng()*1.4;
+    shAmp.push([.003+rng()*.006,.003+rng()*.006,.003+rng()*.006]);
+    shFreq[i]=.5+rng()*1.1;
+    shPhase.push([rng()*6.2832,rng()*6.2832,rng()*6.2832]);
+  }
+  // per-cluster veins: SPARSE and SHORT — the dots carry the clusters,
+  // the lines only hint at structure (the anti-scribble rule)
+  const mesh=[];
+  for(let ci=0;ci<CLUSTERS.length;ci++){
+    if(CLUSTERS[ci][5]>300)continue;
+    const idx=[];for(let i=0;i<N;i++)if(cidx[i]===ci)idx.push(i);
+    const maxLen=CLUSTERS[ci][3]*.85;
+    for(const i of idx){
+      let bj=-1,bd=1e9;
+      for(const j of idx){
+        if(j===i)continue;
+        const dx=pts[i][0]-pts[j][0],dy=pts[i][1]-pts[j][1];
+        const d=Math.hypot(dx,dy);
+        if(d<bd){bd=d;bj=j}
+      }
+      if(bj>=0&&bd<=maxLen&&i<bj)mesh.push([i,bj,ci]);
+    }
+  }
+  // the crescent
+  const nArc=620,arc=[],arcW=new Float32Array(nArc),arcTw=new Float32Array(nArc);
+  const mid=185*Math.PI/180;
+  for(let i=0;i<nArc;i++){
+    const ang=(115+rng()*140)*Math.PI/180;
+    const rad=CRESCENT_R+gauss()*.012;
+    arc.push([CRESCENT_C[0]+Math.cos(ang)*rad,
+              CRESCENT_C[1]+Math.sin(ang)*rad*.92,gauss()*.02]);
+    arcW[i]=Math.exp(-Math.pow((ang-mid)/.9,2));
+    arcTw[i]=rng()*6.2832;
+  }
+  // tendrils
+  const tendrils=[];
+  for(let k=0;k<N_TENDRILS;k++){
+    const ci=rng()*(CLUSTERS.length-1)|0;
+    const c=[CLUSTERS[ci][1],CLUSTERS[ci][2]];
+    const a=[c[0]+gauss()*CLUSTERS[ci][3],c[1]+gauss()*CLUSTERS[ci][3]];
+    let out=[a[0]-CRESCENT_C[0],a[1]-CRESCENT_C[1]];
+    const ol=Math.hypot(out[0],out[1])+1e-6;
+    out=[out[0]/ol,out[1]/ol];
+    const up=a[1]<.1?[0,-.6]:[0,.3];
+    const reach=.35+rng()*.5;
+    const end=[a[0]+(out[0]+up[0])*reach+gauss()*.12,
+               a[1]+(out[1]+up[1])*reach+gauss()*.12];
+    const ctrl=[(a[0]+end[0])/2+gauss()*.10,(a[1]+end[1])/2+gauss()*.10];
+    const curve=[];
+    for(let s=0;s<9;s++){
+      const tt=s/8;
+      curve.push([(1-tt)*(1-tt)*a[0]+2*(1-tt)*tt*ctrl[0]+tt*tt*end[0],
+                  (1-tt)*(1-tt)*a[1]+2*(1-tt)*tt*ctrl[1]+tt*tt*end[1],0]);
+    }
+    const dset=new Set();
+    while(dset.size<2)dset.add(3+(rng()*6|0));
+    tendrils.push({pts:curve,ci,sway:.006+rng()*.012,sf:.15+rng()*.25,
+                   sp:rng()*6.2832,dots:[...dset].sort((x,y)=>x-y).concat([8])});
+  }
+  P={pts,cols,cidx,N,twPhase,twSpeed,shAmp,shFreq,shPhase,mesh,
+     arc,arcW,arcTw,tendrils,dots:[],heat:new Float32Array(CLUSTERS.length),
+     cascade:0,cascadeT:0};
+}
+
+/* living parallax you can actually SEE (a full sway ~14s) */
+function project(p,t,out){
+  const yaw=.16*Math.sin(t*.45), wob=.06*Math.sin(t*.31+1.3);
+  const cyw=Math.cos(yaw),syw=Math.sin(yaw);
+  const cxw=Math.cos(wob),sxw=Math.sin(wob);
+  const x=p[0],y=p[1],z=p[2];
+  const x2=x*cyw+z*syw, z2=-x*syw+z*cyw;
+  const y2=y*cxw-z2*sxw, z3=y*sxw+z2*cxw;
+  const persp=3/(3+z3);
+  out[0]=cx+x2*scalePx*persp;
+  out[1]=cy+y2*scalePx*persp*.98;
+  out[2]=persp;
+  return out;
+}
+
+/* ---------------- per-frame ---------------- */
+let listenAmt=0, now=0;
+// Eased state fades (the board's grammar): every state change crossfades
+// instead of cutting, and these drive colour, brightness, and drift speed.
+let listenS=0, thinkS=0, speakS=0;
+// A warped clock. The parallax sway rides this instead of real time, so the
+// whole field visibly speeds up while thinking and eases down at idle.
+let warp=0;
+let micHist=[], outHist=[], chipFlicker={}, fpsN=0, fpsT=0, fpsTxt="";
+const _pr=[0,0,0];
+const labelXY=new Float32Array(N_REGIONS*2);
+
+function splat(xi,yi,r,g,b,f){
+  if(xi<1||xi>=W-2||yi<1||yi>=H-2)return;
+  const i=(yi*W+xi)*4;
+  if(bufData[i+3]===0){touched[touchedN++]=i;bufData[i+3]=255}
+  bufData[i]=Math.min(255,bufData[i]+r*f);
+  bufData[i+1]=Math.min(255,bufData[i+1]+g*f);
+  bufData[i+2]=Math.min(255,bufData[i+2]+b*f);
+}
+
+function frame(dt){
+  AV.tick(dt);
+  now+=dt;
+  const state=AV.state, env=AV.env, alert=AV.alert;
+  const t=now/1000, dts=dt/1000;
+  const lt=state==="listening"?AV.micLevel:0;
+  listenAmt+=(lt-listenAmt)*Math.min(1,dt/120);
+
+  /* state fades + the warped clock */
+  listenS+=((state==="listening"?1:0)-listenS)*(1-Math.exp(-dt/380));
+  speakS +=((state==="speaking" ?1:0)-speakS )*(1-Math.exp(-dt/380));
+  const thinkT=state==="thinking";
+  thinkS +=((thinkT?1:0)-thinkS)*(1-Math.exp(-dt/(thinkT?300:160)));
+  warp+=dts*(0.55+1.30*thinkS+0.45*speakS+0.20*listenS);
+
+  /* heat + cascade + traveling dots */
+  const heat=P.heat;
+  // heat bleeds off fast while thinking so the cascade reads as a moving
+  // wave rather than the whole brain slowly lighting up at once
+  const decay=1.6+3.4*thinkS;
+  for(let i=0;i<heat.length;i++)heat[i]*=Math.max(0,1-dts*decay);
+  if(state==="listening"){
+    // input side of the brain warms: SENSORY leads, VISUAL and BRAINSTEM follow
+    heat[2]=Math.max(heat[2],.60+.40*listenAmt);
+    heat[5]=Math.max(heat[5],.30+.30*listenAmt);
+    heat[8]=Math.max(heat[8],.25+.25*listenAmt);
+  }
+  if(state==="speaking"){
+    // output side lights up, all of it riding the live voice envelope
+    heat[4]=Math.max(heat[4],.60+.40*env);   // LANGUAGE
+    heat[0]=Math.max(heat[0],.45+.45*env);   // PREFRONTAL
+    heat[1]=Math.max(heat[1],.30+.45*env);   // MOTOR
+    heat[3]=Math.max(heat[3],.35+.40*env);   // ASSOCIATION
+  }
+  if(thinkT){
+    // a fast sweep with a trailing comet tail across the nine regions
+    P.cascadeT+=dts;
+    if(P.cascadeT>.14){P.cascadeT=0;P.cascade=(P.cascade+1)%N_REGIONS}
+    for(let k=0;k<4;k++){
+      const idx=(P.cascade-k+N_REGIONS*2)%N_REGIONS;
+      heat[idx]=Math.max(heat[idx],1.0-k*.23);
+    }
+  }
+  const rate=(PROFILE[state]||PROFILE.idle)[0]*(1+1.5*env);
+  if(Math.random()<rate*dts)
+    P.dots.push({ti:Math.random()*P.tendrils.length|0,t:0,s:.35+Math.random()*.35});
+  const dotSpeed=1+1.6*thinkS+0.6*speakS;   // thought-pulses race while thinking
+  for(const d of P.dots)d.t+=dts*d.s*dotSpeed;
+  P.dots=P.dots.filter(d=>d.t<1).slice(0,60);
+
+  /* ---- 1) colored cluster points into the pixel buffer ---- */
+  for(let k=0;k<touchedN;k++){
+    const i=touched[k];
+    bufData[i]=0;bufData[i+1]=0;bufData[i+2]=0;bufData[i+3]=0;
+  }
+  touchedN=0;
+  const breath=1+.008*Math.sin(t*.5)+.018*env;
+  const base=(PROFILE[state]||PROFILE.idle)[1];
+  const live=[0,0,0];
+  for(let i=0;i<P.N;i++){
+    const ci=P.cidx[i];
+    const cc=CLUSTERS[ci];
+    const bfac=1+.035*Math.sin(t*.7+ci*1.7);
+    const p=P.pts[i];
+    live[0]=(cc[1]+(p[0]-cc[1])*bfac)*breath
+      +P.shAmp[i][0]*Math.sin(t*P.shFreq[i]+P.shPhase[i][0]);
+    live[1]=(cc[2]+(p[1]-cc[2])*bfac)*breath
+      +P.shAmp[i][1]*Math.sin(t*P.shFreq[i]+P.shPhase[i][1]);
+    live[2]=p[2]*breath+P.shAmp[i][2]*Math.sin(t*P.shFreq[i]+P.shPhase[i][2]);
+    project(live,warp,_pr);
+    const tw=.62+.38*Math.sin(t*P.twSpeed[i]+P.twPhase[i]);
+    const bright=Math.min((base+.32*env+.7*heat[ci])*tw*_pr[2],BRIGHT_CAP);
+    let r,g,b;
+    if(alert){r=255*bright;g=(50+P.cols[i][1]*.1)*bright;b=45*bright}
+    else{
+      // Colour stays colour (the hard rule), but the whole field takes a COOL
+      // cast while listening — the same "signals coming in" language the board
+      // uses. Idle desaturates slightly; thinking and speaking stay full.
+      r=P.cols[i][0];g=P.cols[i][1];b=P.cols[i][2];
+      if(listenS>.01){
+        const k=.55*listenS;
+        r+=(70-r)*k;g+=(185-g)*k;b+=(255-b)*k;
+      }
+      r*=bright;g*=bright;b*=bright;
+    }
+    const xi=_pr[0]|0,yi=_pr[1]|0;
+    splat(xi,yi,r,g,b,1);
+    splat(xi+1,yi,r,g,b,.45);
+    splat(xi,yi+1,r,g,b,.45);
+  }
+  // label anchors: the projected cluster centers, steady under the shimmer
+  for(let ci=0;ci<N_REGIONS;ci++){
+    live[0]=CLUSTERS[ci][1];live[1]=CLUSTERS[ci][2];live[2]=0;
+    project(live,warp,_pr);
+    labelXY[ci*2]=_pr[0];labelXY[ci*2+1]=_pr[1];
+  }
+  /* ---- 2) the crescent into the same buffer ---- */
+  // The crescent is the single brightest element, so it carries the state
+  // loudest: dim at idle, cool while listening, hot while thinking, and
+  // riding the live envelope while speaking.
+  const arcCol=alert?[255,90,80]
+    :[215+(150-215)*listenS,240+(215-240)*listenS,255];
+  for(let i=0;i<P.arc.length;i++){
+    const p=P.arc[i];
+    live[0]=p[0]*breath;live[1]=p[1]*breath;live[2]=p[2]*breath;
+    project(live,warp,_pr);
+    const atw=.75+.25*Math.sin(t*.9+P.arcTw[i]);
+    const ab=Math.min(1.6,P.arcW[i]*atw*(.50+.90*env+.55*thinkS+.20*listenS)*1.6);
+    const r=arcCol[0]*ab,g=arcCol[1]*ab,b=arcCol[2]*ab;
+    const xi=_pr[0]|0,yi=_pr[1]|0;
+    splat(xi,yi,r,g,b,1);
+    splat(xi+1,yi,r,g,b,.6);splat(xi,yi+1,r,g,b,.6);
+    splat(xi-1,yi,r,g,b,.6);splat(xi,yi-1,r,g,b,.6);
+  }
+  fg.putImageData(buf,0,0);
+
+  /* ---- 3) ALL the lines drawn INTO the field so they bloom too ---- */
+  fg.globalCompositeOperation="lighter";
+  const proj2=(p,o)=>{live[0]=p[0]*breath;live[1]=p[1]*breath;live[2]=p[2]*breath;
+    return project(live,warp,o)};
+  const _a=[0,0,0],_b=[0,0,0];
+  for(const[a,b,ci]of P.mesh){
+    const hue=CLUSTERS[ci][4];
+    const f=Math.min(.48,.16+.08*Math.pow(Math.sin(t*.6+ci),2)
+      +.24*heat[ci]+.10*env);
+    fg.strokeStyle=dim(alert?RED:hue,f);
+    fg.lineWidth=1;
+    proj2(P.pts[a],_a);proj2(P.pts[b],_b);
+    fg.beginPath();fg.moveTo(_a[0],_a[1]);fg.lineTo(_b[0],_b[1]);fg.stroke();
+  }
+  const pale=[120,132,168];
+  for(const td of P.tendrils){
+    const off=td.sway*Math.sin(t*td.sf+td.sp);
+    fg.strokeStyle=dim(alert?RED:pale,.42+.15*env);
+    fg.lineWidth=1;
+    fg.beginPath();
+    const proj9=[];
+    for(let s=0;s<9;s++){
+      const p=td.pts[s];
+      live[0]=(p[0]+off*Math.pow(s/8,2))*breath;
+      live[1]=p[1]*breath;live[2]=0;
+      project(live,warp,_pr);
+      proj9.push([_pr[0],_pr[1]]);
+      s?fg.lineTo(_pr[0],_pr[1]):fg.moveTo(_pr[0],_pr[1]);
+    }
+    fg.stroke();
+    fg.fillStyle=dim(alert?RED:[235,240,255],.75+.25*env);
+    for(const di of td.dots){
+      fg.beginPath();fg.arc(proj9[di][0],proj9[di][1],2,0,6.29);fg.fill();
+    }
+    td._proj=proj9;
+  }
+  fg.fillStyle=alert?dim(RED,1):"rgb(245,248,255)";
+  for(const d of P.dots){
+    const proj9=P.tendrils[d.ti]._proj;
+    if(!proj9)continue;
+    const seg=d.t*8, kk=Math.min(7,seg|0), frac=seg-kk;
+    const x=proj9[kk][0]+(proj9[kk+1][0]-proj9[kk][0])*frac;
+    const y=proj9[kk][1]+(proj9[kk+1][1]-proj9[kk][1])*frac;
+    fg.beginPath();fg.arc(x,y,3,0,6.29);fg.fill();
+  }
+  fg.globalCompositeOperation="source-over";
+
+  /* ---- 4) bloom the WHOLE field (lines included) + composite ---- */
+  ctx.fillStyle=BG;ctx.fillRect(0,0,W,H);
+  U.bloomBlit(ctx,field,W,H);
+
+  // soft ambient behind the crescent
+  live[0]=CRESCENT_C[0];live[1]=CRESCENT_C[1];live[2]=0;
+  project(live,warp,_pr);
+  const haloC=alert?RED:[90,130,255];
+  if(!frame._halo)frame._halo={};
+  const hk=haloC.join(",");
+  if(!frame._halo[hk])frame._halo[hk]=U.makeGlow(haloC.map(v=>v*.5|0),300);
+  const hs=scalePx*.85;
+  ctx.globalCompositeOperation="lighter";
+  ctx.globalAlpha=.28+.25*env;
+  ctx.drawImage(frame._halo[hk],_pr[0]-hs/2,_pr[1]-hs/2,hs,hs);
+  ctx.globalAlpha=1;ctx.globalCompositeOperation="source-over";
+
+  drawLabels(alert);
+  drawChrome(state,alert,env,t);
+  if(alert)drawAlertFrame();
+}
+
+/* ---------------- labels + chrome (crisp, post-bloom) ---------------- */
+function drawLabels(alert){
+  ctx.font=MONO_SM;ctx.textBaseline="top";
+  for(let ci=0;ci<N_REGIONS;ci++){
+    const[name,,,,hue]=CLUSTERS[ci];
+    const a=.55+.45*Math.min(1,P.heat[ci]);
+    const col=alert?RED:hue;
+    const x=labelXY[ci*2]+10,y=labelXY[ci*2+1]-18;
+    const w2=ctx.measureText(name).width;
+    ctx.strokeStyle=dim(col,a*.55);ctx.lineWidth=1;
+    ctx.strokeRect(x-3,y-2,w2+6,15);
+    ctx.fillStyle=dim(col,a);
+    ctx.fillText(name,x,y);
+  }
+}
+
+function chipFor(name,ri,state,alert){
+  if(alert)return["FAULT",RED];
+  if(Math.random()<.004)chipFlicker[name]=now+300+Math.random()*900;
+  const flick=now<(chipFlicker[name]||0);
+  if(ri!=null){
+    const h=P.heat[ri];
+    if(h>.55)return["LIVE",GREEN];
+    if(h>.2||flick)return["ACT",CYAN];
+    return["IDLE",dim2(INK,.8)];
+  }
+  if(name==="STT")return state==="listening"?["LIVE",GREEN]:["RDY",dim2(INK,.8)];
+  if(name==="TTS")return state==="speaking"?["LIVE",GREEN]:["RDY",dim2(INK,.8)];
+  if(name==="MEMORY")return(state==="thinking"||flick)?["READ",CYAN]:["OK",dim2(INK,.8)];
+  return["OK",(now/1000|0)%4?GREEN:dim2(GREEN,.7)];
+}
+function dim2(c,f){return[c[0]*f|0,c[1]*f|0,c[2]*f|0]}
+function drawChrome(state,alert,env,t){
+  const ink=alert?RED:INK, inkB=alert?RED:INK_BRIGHT;
+  ctx.strokeStyle=dim(ink,.35);ctx.lineWidth=1;
+  ctx.strokeRect(10,10,W-20,H-20);
+  const L=26;
+  ctx.strokeStyle=dim(inkB,1);ctx.lineWidth=2;
+  for(const[kx,ky,dx,dy]of[[12,12,1,1],[W-12,12,-1,1],[12,H-12,1,-1],[W-12,H-12,-1,-1]]){
+    ctx.beginPath();ctx.moveTo(kx,ky);ctx.lineTo(kx+L*dx,ky);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(kx,ky);ctx.lineTo(kx,ky+L*dy);ctx.stroke();
+  }
+  ctx.textBaseline="top";
+  ctx.font=MONO_LG;ctx.fillStyle=dim(inkB,1);
+  ctx.fillText(AV.label,28,24);
+  ctx.font=MONO;ctx.fillStyle=dim(ink,.8);
+  ctx.fillText("NEURAL CORE // COGNITIVE",28,44);
+  const d=new Date();
+  const pad=n=>String(n).padStart(2,"0");
+  const clock=`${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  const rec=((t*2)|0)%2===0?"●":" ";
+  ctx.fillStyle=dim(alert?RED:GREEN,1);
+  ctx.textAlign="center";
+  ctx.fillText(`${rec} RECEIVING · LIVE · ${pad(d.getMonth()+1)}/${pad(d.getDate())} ${clock}`,W/2,24);
+  ctx.textAlign="left";
+  if(AV.badge){
+    ctx.font=MONO_LG;ctx.fillStyle=dim(inkB,1);
+    ctx.textAlign="right";ctx.fillText(AV.badge,W-190,24);ctx.textAlign="left";
+  }
+  ctx.font=MONO;ctx.fillStyle=dim(ink,.8);
+  ctx.textAlign="right";ctx.fillText(clock,W-190,44);ctx.textAlign="left";
+
+  // right panel: CORTEX STATUS
+  const px2=W-172,pw=148;let py=84;
+  ctx.font=MONO;ctx.fillStyle=dim(inkB,1);
+  ctx.fillText("CORTEX STATUS",px2,py);
+  ctx.strokeStyle=dim(ink,.6);ctx.lineWidth=1;
+  ctx.beginPath();ctx.moveTo(px2,py+18);ctx.lineTo(px2+pw,py+18);ctx.stroke();
+  py+=26;
+  ctx.font=MONO_SM;
+  for(const[name,ri]of PANEL_ROWS){
+    const[chip,col]=chipFor(name,ri,state,alert);
+    ctx.fillStyle=dim(ink,.85);
+    ctx.fillText(name,px2,py);
+    const cw2=ctx.measureText(chip).width;
+    ctx.fillStyle=`rgba(${col[0]},${col[1]},${col[2]},.25)`;
+    ctx.fillRect(px2+pw-cw2-8,py-1,cw2+6,14);
+    ctx.fillStyle=dim(col,1);
+    ctx.fillText(chip,px2+pw-cw2-5,py);
+    py+=19;
+  }
+
+  // PLAN USAGE — the five-hour and weekly windows, drawn only when the
+  // voice line was told to publish them. Nothing here appears by
+  // default: it is the account holder's own spend and this face is
+  // often pointed at a camera.
+  //
+  // A window that has reported no percentage yet draws a dash rather
+  // than vanishing. A row that disappears reads as a broken panel; a
+  // dash reads as "not yet", which is what it actually means.
+  const usage=AV.util.usageRows();
+  if(usage.length){
+    ctx.strokeStyle=dim(ink,.35);ctx.lineWidth=1;
+    ctx.beginPath();ctx.moveTo(px2,py-9);ctx.lineTo(px2+pw,py-9);ctx.stroke();
+    py+=5;
+    for(const r of usage){
+      ctx.fillStyle=dim(ink,.85);
+      ctx.fillText(r.label,px2,py);
+      const tw=ctx.measureText(r.text).width;
+      ctx.fillStyle=dim(r.hot?RED:AMBER,1);
+      ctx.fillText(r.text,px2+pw-tw,py);
+      py+=19;
+    }
+  }
+
+  // meters
+  micHist.push(state==="listening"?AV.micLevel:AV.micLevel*.25);
+  micHist=micHist.slice(-46);
+  const bx=28,by=H-46;
+  ctx.font=MONO_SM;
+  ctx.fillStyle=state==="listening"?dim(AMBER,1):dim(ink,.7);
+  ctx.fillText("MIC IN",bx,by-16);
+  for(let i=0;i<micHist.length;i++){
+    const bh=Math.max(1,micHist[i]*22|0);
+    ctx.fillStyle=state==="listening"?dim(AMBER,1):dim(ink,.55);
+    ctx.fillRect(bx+i*4,by+22-bh,3,bh);
+  }
+  outHist.push(env);outHist=outHist.slice(-46);
+  const ox=W-28-46*4;
+  ctx.fillStyle=state==="speaking"?dim(inkB,1):dim(ink,.7);
+  ctx.fillText("AUDIO OUT",ox,by-16);
+  for(let i=0;i<outHist.length;i++){
+    const bh=Math.max(1,outHist[i]*22|0);
+    ctx.fillStyle=state==="speaking"?dim(CYAN,1):dim(ink,.55);
+    ctx.fillRect(ox+i*4,by+22-bh,3,bh);
+  }
+
+  const label=alert?"ALERT":state.toUpperCase();
+  ctx.font=MONO;ctx.textAlign="center";
+  ctx.fillStyle=alert?dim(RED,1):dim(inkB,.9);
+  ctx.fillText(`// ${label}`,W/2,H-40);
+  ctx.textAlign="left";
+
+  // fps readout (honesty meter)
+  fpsN++;
+  if(now-fpsT>=1000){fpsTxt=`${fpsN} FPS`;fpsN=0;fpsT=now;}
+  ctx.font=MONO_SM;ctx.fillStyle=dim(ink,.5);
+  ctx.fillText(fpsTxt,28,H-74);
+}
+
+function drawAlertFrame(){
+  const pulse=.45+.55*Math.abs(Math.sin(now/250));
+  ctx.fillStyle=`rgba(${RED[0]},${RED[1]},${RED[2]},${.6*pulse})`;
+  ctx.fillRect(0,0,W,6);ctx.fillRect(0,H-6,W,6);
+  ctx.fillRect(0,0,6,H);ctx.fillRect(W-6,0,6,H);
+}
+
+/* ---------------- boot / loop ---------------- */
+function resize(){
+  W=cv.width=innerWidth;H=cv.height=innerHeight;
+  cx=W*.46|0;cy=H*.52|0;scalePx=Math.min(W,H)*.52;
+  field=document.createElement("canvas");
+  field.width=W;field.height=H;
+  fg=field.getContext("2d");
+  buf=fg.createImageData(W,H);
+  bufData=buf.data;
+  touched=new Int32Array(W*H);
+  touchedN=0;
+}
+build();
+addEventListener("resize",resize);
+resize();
+
+addEventListener("keydown",e=>{
+  if(e.key==="f"||e.key==="F"){
+    document.fullscreenElement?document.exitFullscreen()
+      :document.documentElement.requestFullscreen();
+  }
+});
+
+if(SHOT){
+  AV.shotRun(frame);
+}else{
+  let last=performance.now();
+  (function loop(ts){
+    const dt=Math.min(100,ts-last);last=ts;
+    frame(dt);
+    requestAnimationFrame(loop);
+  })(performance.now());
+}
+</script>
+</body>
+</html>

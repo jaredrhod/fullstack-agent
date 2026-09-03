@@ -1,0 +1,708 @@
+<!DOCTYPE html>
+<!--
+ai-visualizer: give your AI agent a face.
+Copyright (C) 2026 Jared Rhodenizer
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published
+by the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+SPDX-License-Identifier: AGPL-3.0-or-later
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>The Radial</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{width:100%;height:100%;background:#050907;overflow:hidden;cursor:none}
+  canvas#stage{position:fixed;inset:0;width:100vw;height:100vh;display:block}
+</style>
+</head>
+<body>
+<canvas id="stage"></canvas>
+<script src="../../core.js"></script>
+<script>
+"use strict";
+/* ============================================================
+   THE RADIAL  ·  the starburst
+   A full radial starburst of 80 spectrum bars around a living
+   particle orb: thousands of green grains forming a ball that
+   rotates, churns, and DETONATES from the core with every
+   syllable. Around it: particles bursting off rising peaks, a
+   connecting polygon web, concentric frequency rings, a pulse
+   ring, a drifting star-and-nebula galaxy behind everything.
+
+   idle       sonar ripples, a radar scanner arc, twinkling
+              constellation stars — alive, never frozen
+   listening / thinking
+              an amber data-tick wheel + rotating HUD arcs
+   speaking   the starburst erupts on the live waveform and the
+              orb explodes from the inside, per syllable
+   alert      red pulsing rings + vignette
+   Keys: F = fullscreen.
+   ============================================================ */
+
+const Q=new URLSearchParams(location.search);
+const SHOT=Q.get("shot");
+AV.init({});
+AV.ready(a=>{document.title=a.name+" Radial";});
+
+const NUM_BARS=80;
+const BG="#050907";
+const BAR_COLORS=[[16,74,38],[26,118,60],[40,170,86],[74,240,122],[105,250,150],[160,255,195]];
+const SMOOTHING=.3, GRAVITY=.92;
+const SENSITIVITY=.55;
+const MAX_PARTICLES=300, SPAWN_THRESHOLD=.6;
+const ALERT_INNER=[255,30,20], ALERT_OUTER=[200,10,10];
+
+const cv=document.getElementById("stage"), ctx=cv.getContext("2d");
+let W=0,H=0;
+
+/* ---------------- spectrum from the bus waveform ----------------
+   The bus carries a 64-sample waveform snapshot. A tiny DFT turns it
+   into 32 magnitude bins; the bars log-map across them so lows and
+   highs land on different spokes, the way a real spectrum does. */
+const mags=new Float32Array(32);
+const barMax=new Float32Array(NUM_BARS).fill(1);
+const bandMax=[1,1,1];
+let bassE=0,midE=0,highE=0;
+function spectrum(){
+  const s=AV.rawSamples;
+  if(!s){mags.fill(0);return}
+  for(let k=1;k<=32;k++){
+    let re=0,im=0;
+    for(let n=0;n<64;n++){
+      const a=6.2831853*k*n/64;
+      const v=s[n]||0;
+      re+=v*Math.cos(a);im-=v*Math.sin(a);
+    }
+    mags[k-1]=Math.hypot(re,im)/64;
+  }
+  const band=(a,b)=>{let m=0;for(let k=a;k<b;k++)m+=mags[k];return m/(b-a)};
+  const vals=[band(0,5),band(5,15),band(15,32)];
+  for(let i=0;i<3;i++){
+    if(vals[i]>bandMax[i])bandMax[i]=vals[i];else bandMax[i]*=.999;
+    const n=bandMax[i]>0?vals[i]/bandMax[i]:0;
+    if(i===0)bassE=bassE*.7+n*.3;
+    else if(i===1)midE=midE*.7+n*.3;
+    else highE=highE*.7+n*.3;
+  }
+}
+function barTargets(out){
+  const logMax=Math.log(32);
+  for(let i=0;i<NUM_BARS;i++){
+    const k=Math.exp(i/(NUM_BARS-1)*logMax)-1;      // 0..31, log spaced
+    const k0=Math.min(31,k|0), f=k-k0;
+    let v=mags[k0]*(1-f)+mags[Math.min(31,k0+1)]*f;
+    v*=1+(i/NUM_BARS)*4;                             // treble lift
+    if(v>barMax[i])barMax[i]=v;else barMax[i]*=.999;
+    out[i]=Math.min(1,(barMax[i]>0?v/barMax[i]:0)/SENSITIVITY);
+  }
+}
+
+/* ---------------- the particle orb (the center piece) ----------------
+   Thousands of grains forming a ball. Energy is internal pressure — it
+   pushes grains outward FROM THE CENTER, hardest at the core, barely at
+   the crust. Rising energy fires a blast transient that rebounds fast,
+   so every syllable detonates. */
+const ORB_N=6200;
+const orb={};
+function orbBuild(){
+  const r32=(s=>{let a=s;return()=>{a|=0;a=a+0x6D2B79F5|0;
+    let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;
+    return((t^t>>>14)>>>0)/4294967296}})(11);
+  const gauss=()=>{let u=0,v=0;while(!u)u=r32();while(!v)v=r32();
+    return Math.sqrt(-2*Math.log(u))*Math.cos(6.2831853*v)};
+  orb.dirs=new Float32Array(ORB_N*3);
+  orb.r0=new Float32Array(ORB_N);
+  orb.cols=new Uint8Array(ORB_N*3);
+  orb.twP=new Float32Array(ORB_N);
+  orb.twS=new Float32Array(ORB_N);
+  const nShell=ORB_N*.65|0;
+  for(let i=0;i<ORB_N;i++){
+    let dx=gauss(),dy=gauss(),dz=gauss();
+    const l=Math.hypot(dx,dy,dz)||1;
+    orb.dirs[i*3]=dx/l;orb.dirs[i*3+1]=dy/l;orb.dirs[i*3+2]=dz/l;
+    orb.r0[i]=i<nShell?Math.pow(.82+r32()*.18,.7)
+                      :Math.pow(r32(),1/3)*.85;
+    orb.twP[i]=r32()*6.2832;
+    orb.twS[i]=.12+r32()*.33;         // slow organic shimmer
+    // randomized vivid greens: every grain its own hue
+    if(r32()<.10){orb.cols[i*3]=225;orb.cols[i*3+1]=255;orb.cols[i*3+2]=235}
+    else{
+      const h=.26+r32()*.18, s2=.82+r32()*.18, v2=.92+r32()*.08;
+      const f=(n)=>{const k=(n+h*6)%6;
+        return v2-v2*s2*Math.max(0,Math.min(k,4-k,1))};
+      orb.cols[i*3]=f(5)*255;orb.cols[i*3+1]=f(3)*255;orb.cols[i*3+2]=f(1)*255;
+    }
+  }
+  orb.rot=0;orb.blast=0;orb.envPrev=0;orb.push=0;orb.t=0;
+  orb.S=0;
+}
+function orbRender(size,energy,breath,dt){
+  const want=Math.max(64,size|0);
+  if(orb.S<want){
+    orb.S=(want*1.55|0)>>1<<1;
+    orb.canvas=document.createElement("canvas");
+    orb.canvas.width=orb.canvas.height=orb.S;
+    orb.g=orb.canvas.getContext("2d");
+    orb.img=orb.g.createImageData(orb.S,orb.S);
+    orb.touched=new Int32Array(orb.S*orb.S);
+    orb.touchedN=0;
+    orb.b4=document.createElement("canvas");
+    orb.b4.width=orb.b4.height=orb.S>>2;
+  }
+  const t=orb.t+=dt/1000;
+  orb.rot+=(0.24+1.2*energy)*dt/1000;
+  const rising=energy-orb.envPrev;
+  orb.envPrev=energy;
+  if(rising>.03&&energy>.20)orb.blast=Math.min(1.25,orb.blast+rising*5);
+  orb.blast=Math.max(0,orb.blast-dt/1000*3.2);
+  const pushTarget=.5*energy+1.15*orb.blast;
+  orb.push+=(pushTarget-orb.push)*Math.min(1,dt/45);
+  const push=orb.push;
+  const S=orb.S,c=S/2,R=(want/2)*.92;
+  const cy_=Math.cos(orb.rot),sy=Math.sin(orb.rot);
+  const wob=.18*Math.sin(t*.23);
+  const cx_=Math.cos(wob),sx=Math.sin(wob);
+  const d=orb.img.data;
+  for(let k2=0;k2<orb.touchedN;k2++){
+    const i=orb.touched[k2];
+    d[i]=0;d[i+1]=0;d[i+2]=0;d[i+3]=0;
+  }
+  orb.touchedN=0;
+  for(let i=0;i<ORB_N;i++){
+    const r0=orb.r0[i];
+    // radial displacement: core grains fly, crust holds (clamped bulge)
+    const rd=Math.min(r0+push*Math.pow(1-r0,1.2)+.18*push,1.48);
+    const x=orb.dirs[i*3]*rd,y=orb.dirs[i*3+1]*rd,z=orb.dirs[i*3+2]*rd;
+    const x2=x*cy_+z*sy, z2=-x*sy+z*cy_;
+    const y2=y*cx_-z2*sx, z3=y*sx+z2*cx_;
+    const xf=c+x2*R, yf=c+y2*R*.97;
+    const depth=.38+.62*(z3+1)/2;
+    const tw=.80+.20*Math.sin(t*orb.twS[i]+orb.twP[i]);
+    const coreFlash=1+orb.blast*2.2*(1-r0);       // the core flashes white-hot
+    const bright=Math.min(depth*tw*coreFlash*(1.18+.85*energy+.20*breath),2.1)*3.5;
+    const r=Math.min(255,orb.cols[i*3]*bright);
+    const g=Math.min(255,orb.cols[i*3+1]*bright);
+    const b=Math.min(255,orb.cols[i*3+2]*bright);
+    // bilinear splat: each grain spreads over its 4 neighbor pixels by
+    // its true sub-pixel position — motion is continuous, zero snapping
+    const x0=xf|0,y0=yf|0;
+    if(x0<0||x0>=S-1||y0<0||y0>=S-1)continue;
+    const fx=xf-x0,fy=yf-y0;
+    const w00=(1-fx)*(1-fy),w10=fx*(1-fy),w01=(1-fx)*fy,w11=fx*fy;
+    for(const[xo,yo,wgt]of[[0,0,w00],[1,0,w10],[0,1,w01],[1,1,w11]]){
+      const idx=((y0+yo)*S+(x0+xo))*4;
+      if(d[idx+3]===0){orb.touched[orb.touchedN++]=idx;d[idx+3]=255}
+      d[idx]=Math.min(255,d[idx]+r*wgt);
+      d[idx+1]=Math.min(255,d[idx+1]+g*wgt);
+      d[idx+2]=Math.min(255,d[idx+2]+b*wgt);
+    }
+  }
+  orb.g.putImageData(orb.img,0,0);
+  // bloom: one downscale tap added twice (the second dimmed)
+  const g4=orb.b4.getContext("2d");
+  g4.clearRect(0,0,orb.b4.width,orb.b4.height);
+  g4.drawImage(orb.canvas,0,0,orb.b4.width,orb.b4.height);
+  orb.g.globalCompositeOperation="lighter";
+  orb.g.drawImage(orb.b4,0,0,S,S);
+  orb.g.globalAlpha=.43;
+  orb.g.drawImage(orb.b4,0,0,S,S);
+  orb.g.globalAlpha=1;
+  orb.g.globalCompositeOperation="source-over";
+  return orb.canvas;
+}
+
+/* ---------------- particles ---------------- */
+const particles=[];
+function spawnParticles(x,y,angle,color,count){
+  for(let i=0;i<count;i++){
+    if(particles.length>=MAX_PARTICLES)return;
+    const a=angle+(Math.random()-.5)*.6;
+    const spd=(1.5+Math.random()*2.5)*(0.5+Math.random());
+    particles.push({x,y,vx:Math.cos(a)*spd,vy:Math.sin(a)*spd,
+      life:30+Math.random()*40|0,maxLife:0,color,
+      size:1.5+Math.random()*2});
+  }
+}
+function drawParticles(dt60){
+  for(const p of particles){
+    if(!p.maxLife)p.maxLife=p.life;
+    p.x+=p.vx*dt60;p.y+=p.vy*dt60;
+    p.vx*=Math.pow(.97,dt60);p.vy*=Math.pow(.97,dt60);
+    p.life-=dt60;
+    const k=Math.max(0,p.life/p.maxLife);
+    const size=Math.max(1,p.size*k);
+    ctx.globalAlpha=k;
+    ctx.fillStyle=`rgb(${p.color[0]},${p.color[1]},${p.color[2]})`;
+    ctx.beginPath();ctx.arc(p.x,p.y,size,0,6.29);ctx.fill();
+    ctx.globalAlpha=k*.25;
+    ctx.beginPath();ctx.arc(p.x,p.y,size*2,0,6.29);ctx.fill();
+  }
+  ctx.globalAlpha=1;
+  for(let i=particles.length-1;i>=0;i--)
+    if(particles[i].life<=0)particles.splice(i,1);
+}
+
+/* ---------------- galaxy backdrop ---------------- */
+let nebula=null;
+const stars=[];
+function buildGalaxy(){
+  nebula=document.createElement("canvas");
+  nebula.width=W;nebula.height=H;
+  const g=nebula.getContext("2d");
+  const colors=[[10,62,32],[8,50,28],[10,34,26],[16,74,40],[6,30,16],[12,56,34]];
+  for(let i=0;i<35;i++){
+    const bx=Math.random()*W,by=Math.random()*H;
+    const col=colors[Math.random()*colors.length|0];
+    const maxR=80+Math.random()*200;
+    const grd=g.createRadialGradient(bx,by,0,bx,by,maxR);
+    grd.addColorStop(0,`rgba(${col[0]},${col[1]},${col[2]},.16)`);
+    grd.addColorStop(1,"rgba(0,0,0,0)");
+    g.fillStyle=grd;
+    g.beginPath();g.arc(bx,by,maxR,0,6.29);g.fill();
+  }
+  stars.length=0;
+  for(let i=0;i<300;i++){
+    stars.push({x:Math.random()*(W+200),y:Math.random()*(H+200),
+      b:40+Math.random()*160,
+      size:[1,1,1,2,2,3][Math.random()*6|0],
+      ts:.02+Math.random()*.06,tp:Math.random()*6.2832});
+  }
+}
+let galX=0,galY=0;
+function drawGalaxy(dt60){
+  galX+=.15*dt60;galY+=.08*dt60;
+  ctx.drawImage(nebula,0,0);
+  for(const s of stars){
+    s.tp+=s.ts*dt60;
+    const tw=.6+.4*Math.sin(s.tp);
+    const par=.5+s.size*.3;
+    const x=((s.x-galX*par)%(W+200)+(W+200))%(W+200)-100;
+    const y=((s.y-galY*par)%(H+200)+(H+200))%(H+200)-100;
+    if(x<-10||x>W+10||y<-10||y>H+10)continue;
+    const b=Math.max(20,Math.min(255,s.b*tw))|0;
+    ctx.fillStyle=`rgb(${b},${b},${Math.min(255,b+25)})`;
+    if(s.size<=1)ctx.fillRect(x,y,1,1);
+    else{
+      ctx.beginPath();ctx.arc(x,y,s.size,0,6.29);ctx.fill();
+      if(s.size>=3){
+        ctx.globalAlpha=.12;
+        ctx.beginPath();ctx.arc(x,y,s.size*3,0,6.29);ctx.fill();
+        ctx.globalAlpha=1;
+      }
+    }
+  }
+}
+
+/* ---------------- idle + working ornaments ---------------- */
+const ripples=[];let rippleCool=0;
+function drawSonar(cxp,cyp,innerR,maxLen,dt60){
+  if(--rippleCool<=0){
+    ripples.push([innerR*1.15,110]);
+    rippleCool=150+Math.random()*90|0;
+  }
+  const maxR=innerR+maxLen;
+  for(const rp of ripples){
+    rp[0]+=1.6*dt60;rp[1]-=.55*dt60;
+    if(rp[1]>0&&rp[0]<maxR*1.1){
+      ctx.strokeStyle=`rgba(74,240,122,${rp[1]/255})`;
+      ctx.lineWidth=2;
+      ctx.beginPath();ctx.arc(cxp,cyp,rp[0],0,6.29);ctx.stroke();
+    }
+  }
+  for(let i=ripples.length-1;i>=0;i--)
+    if(ripples[i][1]<=0||ripples[i][0]>=maxR*1.1)ripples.splice(i,1);
+}
+
+let scanA=0;
+function drawScanner(cxp,cyp,innerR,fade,dt60){
+  scanA+=(2*Math.PI/(60*6))*dt60;
+  if(fade<.01)return;
+  const radius=innerR*1.45;
+  const span=Math.PI*.75, segs=44;
+  for(let i=0;i<segs;i++){
+    const t=i/(segs-1);
+    const a=scanA-span*(1-t);
+    const alpha=t*t*fade*.86;
+    if(alpha<=0)continue;
+    ctx.fillStyle=`rgba(140,255,185,${alpha})`;
+    ctx.beginPath();
+    ctx.arc(cxp+Math.cos(a)*radius,cyp+Math.sin(a)*radius,
+            Math.max(1,1+t*3),0,6.29);
+    ctx.fill();
+  }
+  const hx=cxp+Math.cos(scanA)*radius, hy=cyp+Math.sin(scanA)*radius;
+  for(let i=4;i>0;i--){
+    ctx.fillStyle=`rgba(190,255,220,${fade/(i+2)})`;
+    ctx.beginPath();ctx.arc(hx,hy,4+i*3,0,6.29);ctx.fill();
+  }
+  ctx.fillStyle=`rgba(235,255,245,${fade})`;
+  ctx.beginPath();ctx.arc(hx,hy,4,0,6.29);ctx.fill();
+}
+
+const constel=[];
+function buildConstellation(){
+  constel.length=0;
+  const cols=[[150,255,190],[205,255,225],[74,240,122],[105,250,150]];
+  for(let i=0;i<22;i++){
+    constel.push({angle:Math.random()*6.2832,rf:1.45+Math.random()*1.1,
+      drift:(Math.random()-.5)*.0024,
+      size:[1,1,2,2,2,3][Math.random()*6|0],
+      ba:90+Math.random()*110|0,
+      ts:.015+Math.random()*.03,tp:Math.random()*6.2832,
+      color:cols[Math.random()*cols.length|0]});
+  }
+}
+function drawConstellation(cxp,cyp,innerR,fade,dt60){
+  for(const s of constel){s.angle+=s.drift*dt60;s.tp+=s.ts*dt60}
+  if(fade<.01)return;
+  for(const s of constel){
+    const r=innerR*s.rf;
+    const x=cxp+Math.cos(s.angle)*r, y=cyp+Math.sin(s.angle)*r;
+    const pulse=.35+.65*(.5+.5*Math.sin(s.tp));
+    const a=s.ba*pulse*fade/255;
+    if(a<=0)continue;
+    const[cr,cg,cb]=s.color;
+    for(let i=3;i>0;i--){
+      ctx.fillStyle=`rgba(${cr},${cg},${cb},${a/(i+1)})`;
+      ctx.beginPath();ctx.arc(x,y,s.size+i,0,6.29);ctx.fill();
+    }
+    ctx.fillStyle=`rgba(${cr},${cg},${cb},${a})`;
+    ctx.beginPath();ctx.arc(x,y,s.size,0,6.29);ctx.fill();
+  }
+}
+
+let hudPhase=0;
+function drawTicks(cxp,cyp,innerR,fade,dt60){
+  hudPhase+=.08*dt60;
+  if(fade<.01)return;
+  const ringR=innerR*1.25, num=48, rotation=hudPhase*.35;
+  const baseLen=innerR*.10;
+  ctx.strokeStyle=`rgba(255,180,60,${.86*fade})`;
+  ctx.lineWidth=2;
+  for(let i=0;i<num;i++){
+    const a=(i/num)*6.2832+rotation;
+    const wob=Math.sin(hudPhase*1.4+i*.7);
+    const len=baseLen*(.55+.45*(wob*.5+.5));
+    const r1=ringR-len*.5,r2=ringR+len*.5;
+    ctx.beginPath();
+    ctx.moveTo(cxp+Math.cos(a)*r1,cyp+Math.sin(a)*r1);
+    ctx.lineTo(cxp+Math.cos(a)*r2,cyp+Math.sin(a)*r2);
+    ctx.stroke();
+  }
+}
+function drawHudArcs(cxp,cyp,innerR,fade){
+  if(fade<.01)return;
+  const specs=[[1.18,1,Math.PI*1.1,[255,200,90]],
+               [1.32,-.7,Math.PI*.9,[255,140,30]],
+               [1.46,.5,Math.PI*1.25,[255,170,60]]];
+  specs.forEach(([rf,spin,span,color],i)=>{
+    const start=hudPhase*spin+i*1.1;
+    const radius=innerR*rf, segs=32;
+    for(let j=0;j<segs;j++){
+      const t=j/(segs-1);
+      const a=start+span*t;
+      const alpha=.86*Math.sin(Math.PI*t)*fade;
+      if(alpha<=0)continue;
+      ctx.fillStyle=`rgba(${color[0]},${color[1]},${color[2]},${alpha})`;
+      ctx.beginPath();
+      ctx.arc(cxp+Math.cos(a)*radius,cyp+Math.sin(a)*radius,2,0,6.29);
+      ctx.fill();
+    }
+  });
+}
+
+/* ---------------- bars + rings ---------------- */
+const barH=new Float32Array(NUM_BARS);
+const peakH=new Float32Array(NUM_BARS);
+const prevH=new Float32Array(NUM_BARS);
+const targets=new Float32Array(NUM_BARS);
+let pulseR=0;
+function colorFor(h){
+  const idx=h*(BAR_COLORS.length-1);
+  const lo=idx|0, hi=Math.min(lo+1,BAR_COLORS.length-1), f=idx-lo;
+  return[BAR_COLORS[lo][0]+(BAR_COLORS[hi][0]-BAR_COLORS[lo][0])*f|0,
+         BAR_COLORS[lo][1]+(BAR_COLORS[hi][1]-BAR_COLORS[lo][1])*f|0,
+         BAR_COLORS[lo][2]+(BAR_COLORS[hi][2]-BAR_COLORS[lo][2])*f|0];
+}
+function drawRings(cxp,cyp,innerR,maxLen){
+  const rings=[[bassE,innerR+maxLen*.25,[26,118,60]],
+               [midE,innerR+maxLen*.50,[40,170,86]],
+               [highE,innerR+maxLen*.75,[105,250,150]]];
+  for(const[e,baseR,col]of rings){
+    if(e<.05)continue;
+    ctx.strokeStyle=`rgba(${col[0]},${col[1]},${col[2]},${Math.min(1,e*.7)})`;
+    ctx.lineWidth=Math.max(1,e*4);
+    ctx.beginPath();ctx.arc(cxp,cyp,baseR+e*15,0,6.29);ctx.stroke();
+  }
+}
+function drawPulse(cxp,cyp,innerR){
+  const overall=(bassE+midE+highE)/3;
+  const target=innerR+overall*40;
+  pulseR+=(target-pulseR)*.15;
+  if(overall>.05){
+    const alpha=Math.min(.78,overall*1.18);
+    ctx.strokeStyle=`rgba(74,240,122,${alpha/3})`;
+    ctx.lineWidth=6;
+    ctx.beginPath();ctx.arc(cxp,cyp,pulseR+8,0,6.29);ctx.stroke();
+    ctx.strokeStyle=`rgba(160,255,195,${alpha})`;
+    ctx.lineWidth=2;
+    ctx.beginPath();ctx.arc(cxp,cyp,pulseR,0,6.29);ctx.stroke();
+  }
+}
+
+/* ---------------- alert ---------------- */
+let alertPhase=0;
+function drawAlert(cxp,cyp,innerR,dt60){
+  alertPhase+=.08*dt60;
+  const pulse=.65+.35*Math.sin(alertPhase);
+  const[r1,g1,b1]=ALERT_INNER;
+  ctx.strokeStyle=`rgba(${r1},${g1},${b1},${.78*pulse})`;
+  ctx.lineWidth=4;
+  ctx.beginPath();ctx.arc(cxp,cyp,innerR+12,0,6.29);ctx.stroke();
+  ctx.strokeStyle=`rgba(${r1},${g1},${b1},${.39*pulse})`;
+  ctx.lineWidth=3;
+  ctx.beginPath();ctx.arc(cxp,cyp,innerR+20,0,6.29);ctx.stroke();
+  const[r2,g2,b2]=ALERT_OUTER;
+  ctx.strokeStyle=`rgba(${r2},${g2},${b2},${.47*pulse})`;
+  ctx.lineWidth=2;
+  ctx.beginPath();
+  ctx.arc(cxp,cyp,innerR+50+20*Math.sin(alertPhase*.7),0,6.29);ctx.stroke();
+  ctx.fillStyle=`rgba(${r1},${g1},${b1},${.1*pulse})`;
+  ctx.fillRect(0,0,W,H);
+}
+
+/* ---------------- state fades + orb gate ---------------- */
+let rotation=0, idleFade=0, workingFade=0, breathPhase=0;
+let imgEnergy=0, orbEnergy=0, noiseFloor=.05, gateOpen=false, gateT0=null;
+let orbFont=null;
+
+function frame(dt){
+  AV.tick(dt);
+  const dt60=Math.min(3,dt/16.667);
+  spectrum();
+  barTargets(targets);
+
+  ctx.fillStyle=BG;ctx.fillRect(0,0,W,H);
+  drawGalaxy(dt60);
+
+  for(let i=0;i<NUM_BARS;i++){
+    if(targets[i]>barH[i])barH[i]=barH[i]*SMOOTHING+targets[i]*(1-SMOOTHING);
+    else barH[i]*=Math.pow(GRAVITY,dt60);
+    if(barH[i]>peakH[i])peakH[i]=barH[i];
+    else peakH[i]*=Math.pow(.98,dt60);
+  }
+
+  const cxp=W>>1, cyp=H>>1;
+  const innerR=Math.min(cxp,cyp)*.42;
+  const maxLen=Math.min(cxp,cyp)*.65;
+  rotation+=.002*dt60;
+
+  /* state-driven fades: speaking = both off (bars + halo own the motion),
+     listening/thinking = working ornaments, idle = idle ornaments */
+  const st=AV.state;
+  let idleT=0,workT=0;
+  if(st==="speaking"){idleT=0;workT=0}
+  else if(st==="listening"||st==="thinking"){idleT=0;workT=1}
+  else{idleT=1;workT=0}
+  const ease=(cur,tg,up)=>cur+(tg-cur)*(tg>cur?up:.30)*dt60;
+  idleFade=ease(idleFade,idleT,.08);
+  workingFade=ease(workingFade,workT,.12);
+  if(idleT>.5)drawSonar(cxp,cyp,innerR,maxLen,dt60);
+
+  drawRings(cxp,cyp,innerR,maxLen);
+
+  /* orb energy: smart gate learns the ambient floor so quiet hum can
+     never vibrate the orb; speech opens it with hysteresis */
+  let overall=(bassE+midE+highE)/3;
+  overall=Math.sqrt(Math.max(0,overall));
+  imgEnergy=imgEnergy*.55+overall*.45;
+  if(gateT0===null)gateT0=performance.now();
+  if(performance.now()-gateT0<3000)
+    noiseFloor=Math.max(noiseFloor,Math.min(overall*.95,.20));
+  else if(overall<noiseFloor)noiseFloor=overall;
+  else noiseFloor=Math.min(noiseFloor*1.004+.0002,.35);
+  const thOpen=noiseFloor*2.2+.05, thClose=noiseFloor*1.5+.03;
+  gateOpen=gateOpen?overall>thClose:overall>thOpen;
+  const boost=gateOpen?Math.min(1,(overall-thClose)*2.2):0;
+  if(boost>orbEnergy)orbEnergy=boost;
+  else orbEnergy=Math.max(0,orbEnergy-.045*dt60);
+
+  breathPhase+=(2*Math.PI/(60*8))*dt60;
+  const breath=.5+.5*Math.sin(breathPhase);
+
+  const baseSize=innerR*1.9|0;
+  const orbSurf=orbRender(baseSize,orbEnergy,breath,dt);
+
+  // always-on breathing halo — faint, never off
+  {
+    const a=(20+40*breath)/255;
+    const r=baseSize*.55+breath*18;
+    for(let i=5;i>0;i--){
+      ctx.fillStyle=`rgba(52,190,100,${a/(i+1)})`;
+      ctx.beginPath();ctx.arc(cxp,cyp,r+i*14,0,6.29);ctx.fill();
+    }
+  }
+  // audio halo — intensifies with the voice
+  if(imgEnergy>.02){
+    const a=Math.min(.78,imgEnergy*1.57);
+    const r=baseSize*.6+imgEnergy*60;
+    for(let i=6;i>0;i--){
+      ctx.fillStyle=`rgba(52,190,100,${a/(i+1)})`;
+      ctx.beginPath();ctx.arc(cxp,cyp,r+i*16,0,6.29);ctx.fill();
+    }
+  }
+
+  // idle-only movement: radar scanner + twinkling constellation
+  drawScanner(cxp,cyp,innerR,idleFade,dt60);
+  drawConstellation(cxp,cyp,innerR,idleFade,dt60);
+  // working-state movement: data-tick wheel + HUD arcs
+  drawTicks(cxp,cyp,innerR,workingFade,dt60);
+  drawHudArcs(cxp,cyp,innerR,workingFade);
+
+  /* ---- the starburst ---- */
+  const thickness=Math.max(3,5*Math.min(W,H)/1200|0);
+  const tips=[];
+  for(let i=0;i<NUM_BARS;i++){
+    const angle=(i/NUM_BARS)*6.2832-Math.PI/2+rotation;
+    const barLen=barH[i]*maxLen, peakLen=peakH[i]*maxLen;
+    const ca=Math.cos(angle),sa=Math.sin(angle);
+    const x1=cxp+ca*innerR, y1=cyp+sa*innerR;
+    const x2=cxp+ca*(innerR+barLen), y2=cyp+sa*(innerR+barLen);
+    tips.push([x2,y2]);
+    if(barH[i]<.02)continue;
+    const col=colorFor(barH[i]);
+    ctx.strokeStyle=`rgb(${col[0]},${col[1]},${col[2]})`;
+    ctx.lineWidth=thickness;
+    ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke();
+    // glow pass
+    ctx.strokeStyle=`rgba(${col[0]},${col[1]},${col[2]},.14)`;
+    ctx.lineWidth=thickness*5;
+    ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke();
+    // peak dot
+    if(peakLen>barLen+4){
+      ctx.fillStyle="rgb(160,255,195)";
+      ctx.beginPath();
+      ctx.arc(cxp+ca*(innerR+peakLen),cyp+sa*(innerR+peakLen),
+              Math.max(2,thickness>>1),0,6.29);
+      ctx.fill();
+    }
+    if(barH[i]>SPAWN_THRESHOLD&&barH[i]>prevH[i]+.05)
+      spawnParticles(x2,y2,angle,col,1+(Math.random()*3|0));
+  }
+  prevH.set(barH);
+
+  /* connecting polygon web */
+  for(let i=0;i<tips.length;i++){
+    const j=(i+1)%tips.length;
+    const dx=(tips[i][0]+tips[j][0])/2-cxp, dy=(tips[i][1]+tips[j][1])/2-cyp;
+    const nd=Math.min(1,(Math.hypot(dx,dy)-innerR)/maxLen);
+    const col=colorFor(Math.max(0,nd));
+    ctx.strokeStyle=`rgba(${col[0]},${col[1]},${col[2]},${(30+Math.max(0,nd)*80)/255})`;
+    ctx.lineWidth=1;
+    ctx.beginPath();ctx.moveTo(tips[i][0],tips[i][1]);
+    ctx.lineTo(tips[j][0],tips[j][1]);ctx.stroke();
+  }
+
+  drawParticles(dt60);
+  drawPulse(cxp,cyp,innerR);
+
+  /* the orb in FRONT of everything starburst-related */
+  {
+    const S=orb.S;
+    const half=S/2;
+    ctx.fillStyle="rgb(4,12,8)";
+    ctx.beginPath();ctx.arc(cxp,cyp,S*.44/1.55,0,6.29);ctx.fill();
+    ctx.globalCompositeOperation="lighter";
+    ctx.drawImage(orbSurf,cxp-half,cyp-half);
+    ctx.globalCompositeOperation="source-over";
+    const rRing=S*.50/1.55;                       // canvas is 1.55x the orb
+    ctx.strokeStyle="rgb(60,150,95)";ctx.lineWidth=1;
+    ctx.beginPath();ctx.arc(cxp,cyp,rRing,0,6.29);ctx.stroke();
+    ctx.strokeStyle="rgb(47,107,70)";
+    ctx.beginPath();ctx.arc(cxp,cyp,rRing*1.10,0,6.29);ctx.stroke();
+    ctx.strokeStyle="rgb(66,165,105)";
+    for(let i=0;i<36;i++){
+      const a=i*10*Math.PI/180;
+      const r1=rRing*1.10, r2=rRing*(i%3===0?1.14:1.12);
+      ctx.beginPath();
+      ctx.moveTo(cxp+Math.cos(a)*r1,cyp+Math.sin(a)*r1);
+      ctx.lineTo(cxp+Math.cos(a)*r2,cyp+Math.sin(a)*r2);
+      ctx.stroke();
+    }
+    if(!orbFont)orbFont="10px 'SF Mono',Menlo,Consolas,monospace";
+    ctx.font=orbFont;ctx.fillStyle="rgb(110,220,150)";
+    ctx.textAlign="center";ctx.textBaseline="middle";
+    for(const[txt,ang]of[["NEURAL NET",-60],["SYS LINK",30],["CORE 01",120],["AUX FEED",210]]){
+      const a=ang*Math.PI/180;
+      ctx.fillText(txt,cxp+Math.cos(a)*rRing*1.22,cyp+Math.sin(a)*rRing*1.22);
+    }
+    ctx.textAlign="left";ctx.textBaseline="alphabetic";
+  }
+
+  drawUsage();
+
+  if(AV.alert)drawAlert(cxp,cyp,innerR,dt60);
+}
+
+/* Plan usage, bottom-left. Drawn from AV.util.usageRows so this face cannot
+   disagree with the others about the same number, and silent when the voice
+   line publishes no usage. */
+function drawUsage(){
+  const rows=AV.util.usageRows();
+  if(!rows.length)return;
+  const fs=Math.max(9,Math.round(Math.min(W,H)*.014));
+  ctx.save();
+  ctx.font=`${fs}px 'SF Mono',Menlo,Consolas,monospace`;
+  ctx.textAlign="left";ctx.textBaseline="alphabetic";
+  let y=H-16-(rows.length-1)*(fs+6);
+  for(const r of rows){
+    ctx.fillStyle="rgb(78,120,96)";
+    ctx.fillText(r.label,18,y);
+    ctx.fillStyle=r.hot?"rgb(255,110,90)":"rgb(110,220,150)";
+    ctx.fillText(r.text,18+fs*2.4,y);
+    y+=fs+6;
+  }
+  ctx.restore();
+}
+
+function resize(){
+  W=cv.width=innerWidth;H=cv.height=innerHeight;
+  buildGalaxy();buildConstellation();
+}
+orbBuild();
+addEventListener("resize",resize);
+resize();
+
+addEventListener("keydown",e=>{
+  if(e.key==="f"||e.key==="F"){
+    document.fullscreenElement?document.exitFullscreen()
+      :document.documentElement.requestFullscreen();
+  }
+});
+
+if(SHOT){
+  AV.shotRun(frame);
+}else{
+  let last=performance.now();
+  (function loop(ts){
+    const dt=Math.min(100,ts-last);last=ts;
+    frame(dt);
+    requestAnimationFrame(loop);
+  })(performance.now());
+}
+</script>
+</body>
+</html>

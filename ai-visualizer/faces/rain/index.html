@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<!--
+ai-visualizer: give your AI agent a face.
+Copyright (C) 2026 Jared Rhodenizer
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published
+by the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+SPDX-License-Identifier: AGPL-3.0-or-later
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Face in the Code</title>
+<style>
+  @font-face{font-family:"VT323";src:url("../../assets/VT323-Regular.ttf")}
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{width:100%;height:100%;background:#000;overflow:hidden;cursor:none}
+  canvas#stage{position:fixed;inset:0;width:100vw;height:100vh;display:block}
+</style>
+</head>
+<body>
+<canvas id="stage"></canvas>
+<script src="../../core.js"></script>
+<script>
+"use strict";
+/* ============================================================
+   FACE IN THE CODE  ·  the Matrix-rain face
+   Idles as slow digital rain; when the agent speaks, a face
+   surfaces INSIDE the rain — glyphs brightening through a
+   luminance mask, breathing with the live voice — then dissolves
+   back into random code when it stops. That emergence is the
+   whole show: rain reads as a screensaver until the code looks
+   back at you.
+
+   State -> visual:
+     idle       dim green rain, slow and hypnotic
+     listening  rain dims, amber ribbon rides YOUR mic
+     thinking   rain accelerates + glitch bursts + status word
+     speaking   the face emerges, driven by the voice envelope
+     alert      new glyphs bleed red + pulsing red frame
+
+   The face is assets/face.png — any grayscale portrait on black.
+   Swap the file, reload, and the code looks back with YOUR face.
+   Keys: F = fullscreen.
+   ============================================================ */
+
+const Q=new URLSearchParams(location.search);
+const SHOT=Q.get("shot");
+AV.init({mic:true});
+
+const GLYPH_PX=20, FACE_GLYPH_PX=12, TIERS=16;
+const GREEN=[0,255,70], HEAD=[205,255,205], AMBER=[255,176,64], RED=[255,46,46];
+const RAIN_FADE_PER_SEC=170, MUTATE_PER_SEC=45;
+const RAIN_PROFILE={idle:[1.0,.80],listening:[.55,.45],thinking:[2.6,1.0],speaking:[.85,.55]};
+const FACE_ATTACK=700, FACE_RELEASE=1500;
+const THINKING_WORDS=["PROCESSING","THINKING","QUERYING MEMORY","COMPILING RESPONSE","RUNNING IT DOWN"];
+AV.ready(a=>{
+  document.title=a.name+" Face in the Code";
+});
+
+// Rain glyph alphabet: half-width katakana (mirrored, per the film) + the
+// usual suspects. The atlas pre-renders every family/tier/glyph once.
+const KATAKANA=[];for(let c=0xFF66;c<0xFF9E;c++)KATAKANA.push(String.fromCharCode(c));
+const LATIN="0123456789ABCDEFGHJKLMNPQRSTVXZ*+=<>:".split("");
+const GLYPHS=KATAKANA.concat(LATIN);
+const GLYPH_FONT="'Arial Unicode MS','MS Gothic','Yu Gothic','Hiragino Kaku Gothic ProN',monospace";
+const UI_FONT="'VT323',monospace";
+
+const cv=document.getElementById("stage"), ctx=cv.getContext("2d");
+let W=0,H=0;
+
+/* ---------------- glyph atlas: [family][tier] -> one row canvas ---------------- */
+function buildAtlas(cellH,fams){
+  const font=`${cellH}px ${GLYPH_FONT}`;
+  const probe=document.createElement("canvas").getContext("2d");
+  probe.font=font;
+  const cw=Math.max(6,Math.ceil(probe.measureText("ﾊ").width))+1;
+  const lh=Math.round(cellH*1.15);
+  const out={cell:[cw,lh],fams:{}};
+  const draw=(g,col,alphaMirror)=>{
+    g.font=font;g.textBaseline="top";g.fillStyle=col;
+    GLYPHS.forEach((ch,i)=>{
+      const kat=i<KATAKANA.length;
+      g.save();
+      g.translate(i*cw,0);
+      if(kat){g.translate(cw,0);g.scale(-1,1);}   // film-authentic mirror
+      g.fillText(ch,0,1);
+      g.restore();
+    });
+  };
+  for(const[fam,base]of Object.entries(fams)){
+    const tiers=[];
+    for(let t=0;t<TIERS;t++){
+      const k=(t+1)/TIERS;
+      const c=document.createElement("canvas");
+      c.width=cw*GLYPHS.length;c.height=lh;
+      draw(c.getContext("2d"),`rgb(${base[0]*k|0},${base[1]*k|0},${base[2]*k|0})`);
+      tiers.push(c);
+    }
+    out.fams[fam]=tiers;
+  }
+  const heads=document.createElement("canvas");
+  heads.width=cw*GLYPHS.length;heads.height=lh;
+  draw(heads.getContext("2d"),`rgb(${HEAD[0]},${HEAD[1]},${HEAD[2]})`);
+  out.heads=heads;
+  const headsRed=document.createElement("canvas");
+  headsRed.width=cw*GLYPHS.length;headsRed.height=lh;
+  draw(headsRed.getContext("2d"),"rgb(255,190,190)");
+  out.headsRed=headsRed;
+  out.stamp=(g,tierCanvas,idx,x,y)=>{
+    g.drawImage(tierCanvas,idx*cw,0,cw,lh,x,y,cw,lh);
+  };
+  out.pick=()=>Math.random()*GLYPHS.length|0;
+  return out;
+}
+
+/* ---------------- rain ---------------- */
+let rain=null;
+class Rain{
+  constructor(){
+    this.atlas=buildAtlas(GLYPH_PX,{green:GREEN,red:RED});
+    [this.cw,this.chh]=this.atlas.cell;
+    this.cols=Math.max(1,W/this.cw|0);
+    this.rows=Math.max(1,(H/this.chh|0))+1;
+    this.canvas=document.createElement("canvas");
+    this.canvas.width=W;this.canvas.height=H;
+    this.g=this.canvas.getContext("2d");
+    this.g.fillStyle="#000";this.g.fillRect(0,0,W,H);
+    this.mutAcc=0;this.glitchNext=0;
+    this.head=[];this.speed=[];this.char=[];
+    for(let c=0;c<this.cols;c++){
+      this.head.push(-Math.random()*this.rows);
+      this.speed.push(6+Math.random()*8);
+      this.char.push(this.atlas.pick());
+    }
+  }
+  update(dt,state,alert,thinkAmt,now){
+    const[spdMult,headK]=RAIN_PROFILE[state]||RAIN_PROFILE.idle;
+    // trail decay: a translucent black wash each frame fades every glyph
+    // toward darkness, which is what draws the falling tails
+    this.g.fillStyle=`rgba(0,0,0,${Math.min(.35,RAIN_FADE_PER_SEC*dt/1000/255*1.6)})`;
+    this.g.fillRect(0,0,W,H);
+    const fam=alert?"red":"green";
+    const tiers=this.atlas.fams[fam];
+    const heads=alert?this.atlas.headsRed:this.atlas.heads;
+    // trails follow the state's head brightness, so the whole rain
+    // actually dims when the face is on stage (speaking/listening)
+    const trailTier=tiers[Math.max(1,(TIERS-1)*0.85*headK|0)];
+    const headVisible=headK>=.7;
+    for(let c=0;c<this.cols;c++){
+      const prev=Math.floor(this.head[c]);
+      this.head[c]+=this.speed[c]*spdMult*dt/1000;
+      const cur=Math.floor(this.head[c]);
+      if(cur===prev)continue;
+      const x=c*this.cw;
+      for(let row=prev+1;row<=cur;row++){
+        if(row-1>=0&&row-1<this.rows)
+          this.atlas.stamp(this.g,trailTier,this.char[c],x,(row-1)*this.chh);
+        this.char[c]=this.atlas.pick();
+        if(row>=0&&row<this.rows){
+          const src=headVisible?heads:tiers[(TIERS-1)*headK|0];
+          this.atlas.stamp(this.g,src,this.char[c],x,row*this.chh);
+        }
+      }
+      if(cur>this.rows+(Math.random()*18|0)){
+        this.head[c]=-14+Math.random()*12;
+        this.speed[c]=6+Math.random()*8;
+      }
+    }
+    // in-trail mutations (sparkle)
+    this.mutAcc+=MUTATE_PER_SEC*dt/1000;
+    const m=this.mutAcc|0;
+    if(m){
+      this.mutAcc-=m;
+      const mid=tiers[Math.max(1,(TIERS-1)*0.56*headK|0)];
+      for(let i=0;i<m;i++){
+        const c=Math.random()*this.cols|0;
+        const top=Math.floor(this.head[c])-(2+Math.random()*14|0);
+        if(top>=0&&top<this.rows)
+          this.atlas.stamp(this.g,mid,this.atlas.pick(),c*this.cw,top*this.chh);
+      }
+    }
+    // thinking glitch bursts: short vertical runs stamped into the rain
+    if(thinkAmt>.05&&now>=this.glitchNext){
+      this.glitchNext=now+(60+Math.random()*160)/Math.max(thinkAmt,.2);
+      const bright=tiers[TIERS-1];
+      const n=1+(Math.random()*3|0);
+      for(let k=0;k<n;k++){
+        const c=Math.random()*this.cols|0;
+        const row0=Math.random()*Math.max(1,this.rows-8)|0;
+        const len=3+(Math.random()*6|0);
+        for(let r=row0;r<Math.min(this.rows,row0+len);r++)
+          this.atlas.stamp(this.g,bright,this.atlas.pick(),c*this.cw,r*this.chh);
+      }
+    }
+  }
+}
+
+/* ---------------- the face ---------------- */
+let face=null;
+class Face{
+  constructor(){
+    this.atlas=buildAtlas(FACE_GLYPH_PX,{green:GREEN,red:RED});
+    [this.cw,this.chh]=this.atlas.cell;
+    this.cols=Math.max(1,W/this.cw|0);
+    this.rows=Math.max(1,H/this.chh|0);
+    this.canvas=document.createElement("canvas");
+    this.canvas.width=W;this.canvas.height=H;
+    this.g=this.canvas.getContext("2d");
+    this.cells=[];this.chars=[];this.churn=[];
+    this.presence=0;this.composeNext=0;this.loaded=false;
+    const img=new Image();
+    img.onload=()=>this._load(img);
+    img.onerror=()=>console.warn("[face] assets/face.png missing, rain only");
+    img.src="../../assets/face.png";
+  }
+  _lum(img,w,h){
+    const c=document.createElement("canvas");c.width=w;c.height=h;
+    const g=c.getContext("2d");
+    g.drawImage(img,0,0,w,h);
+    const d=g.getImageData(0,0,w,h).data;
+    const lum=new Float32Array(w*h);
+    for(let i=0;i<w*h;i++)
+      lum[i]=(d[i*4]*.299+d[i*4+1]*.587+d[i*4+2]*.114)/255;
+    return lum;
+  }
+  _load(img){
+    // crop away the black margins so the face fills the grid box
+    const pw=160,ph=Math.max(1,pw*img.height/img.width|0);
+    const probe=this._lum(img,pw,ph);
+    let x0=pw,x1=0,y0=ph,y1=0,any=false;
+    for(let y=0;y<ph;y++)for(let x=0;x<pw;x++)
+      if(probe[y*pw+x]>.08){any=true;
+        if(x<x0)x0=x;if(x>x1)x1=x;if(y<y0)y0=y;if(y>y1)y1=y;}
+    let sx=0,sy=0,sw=img.width,sh=img.height;
+    if(any&&(x1-x0)>3&&(y1-y0)>3){
+      const kx=img.width/pw,ky=img.height/ph,pad=.03;
+      sx=Math.max(0,x0*kx-img.width*pad);
+      sy=Math.max(0,y0*ky-img.height*pad);
+      sw=Math.min(img.width,(x1+1)*kx+img.width*pad)-sx;
+      sh=Math.min(img.height,(y1+1)*ky+img.height*pad)-sy;
+    }
+    // fit into ~88% of grid height, correcting for narrow cells
+    let boxRows=this.rows*.88|0;
+    let boxCols=(sw/sh)*boxRows*(this.chh/this.cw)|0;
+    if(boxCols>this.cols*.92|0){
+      const k=(this.cols*.92|0)/boxCols;
+      boxCols=boxCols*k|0;boxRows=boxRows*k|0;
+    }
+    const crop=document.createElement("canvas");
+    crop.width=boxCols;crop.height=boxRows;
+    crop.getContext("2d").drawImage(img,sx,sy,sw,sh,0,0,boxCols,boxRows);
+    const lum=this._lum(crop,boxCols,boxRows);
+    // normalize FIRST (the render may be moody), then a light gamma
+    const lit=[...lum].filter(v=>v>.04).sort((a,b)=>a-b);
+    const hot=lit.length?lit[Math.min(lit.length-1,lit.length*.98|0)]:1;
+    const c0=(this.cols-boxCols)/2|0;
+    const r0=Math.max(0,(this.rows-boxRows)*.45|0);
+    for(let r=0;r<boxRows;r++)for(let c=0;c<boxCols;c++){
+      const wgt=Math.pow(Math.min(1,lum[r*boxCols+c]/Math.max(hot,1e-6)),1.2);
+      if(wgt>.04){
+        this.cells.push([(c0+c)*this.cw,(r0+r)*this.chh,wgt]);
+        this.chars.push(this.atlas.pick());
+        this.churn.push(300+Math.random()*1300);
+      }
+    }
+    this.loaded=this.cells.length>0;
+    console.log(`[face] mask loaded: ${this.cells.length} cells (${boxCols}x${boxRows} box)`);
+  }
+  update(dt,speaking,env,alert,now){
+    const target=(speaking&&this.loaded)?1:0;
+    const tc=target>this.presence?FACE_ATTACK:FACE_RELEASE;
+    this.presence+=(target-this.presence)*Math.min(1,dt/tc);
+    if(this.presence<.02)return false;
+    if(now<this.composeNext)return true;
+    this.composeNext=now+1000/30;                  // compose at 30Hz
+    const tiers=this.atlas.fams[alert?"red":"green"];
+    const gain=this.presence*(.45+.55*env);
+    const g=this.g;
+    g.fillStyle="#000";g.fillRect(0,0,W,H);
+    const dt30=1000/30;
+    for(let i=0;i<this.cells.length;i++){
+      this.churn[i]-=dt30;
+      if(this.churn[i]<=0){                        // living code: chars churn
+        this.churn[i]=300+Math.random()*1300;
+        this.chars[i]=this.atlas.pick();
+      }
+      const[x,y,wgt]=this.cells[i];
+      const b=wgt*gain;
+      if(b<.03)continue;
+      const tier=tiers[Math.min(TIERS-1,b*TIERS*1.35|0)];
+      this.atlas.stamp(g,tier,this.chars[i],x,y);
+      if(b>.55)this.atlas.stamp(g,tier,this.chars[i],x+1,y);   // highlight glow
+    }
+    return true;
+  }
+}
+
+/* ---------------- lettering + chrome ---------------- */
+const D=AV.util.Descrambler;
+let thinkLabel=null, stateTag=null, tagState="";
+let thinkingAmt=0, micHist=[], rainAlpha=0, now=0;
+
+function drawRibbon(){
+  micHist.push(AV.micLevel);
+  const span=Math.max(60,W/6|0);
+  if(micHist.length>span)micHist=micHist.slice(-span);
+  const base=H*.88|0, amp=H*.07|0, step=W/span;
+  ctx.fillStyle=`rgb(${AMBER[0]},${AMBER[1]},${AMBER[2]})`;
+  for(let i=0;i<micHist.length;i++){
+    const bh=Math.max(2,micHist[i]*amp|0);
+    ctx.fillRect(i*step|0,base-bh,Math.max(2,step-2|0),bh*2);
+  }
+  ctx.font=`${Math.round(Math.min(W,H)*.032)}px ${UI_FONT}`;
+  ctx.textAlign="center";ctx.textBaseline="top";
+  ctx.fillText("LISTENING",W/2,base+amp+8);
+  ctx.textAlign="left";
+}
+
+function drawThinking(dt){
+  if(!thinkLabel||thinkLabel.done)
+    thinkLabel=new D(THINKING_WORDS[Math.random()*THINKING_WORDS.length|0],70,1400);
+  const txt=thinkLabel.render(dt);
+  const fs=Math.round(Math.min(W,H)*.06);
+  ctx.font=`${fs}px ${UI_FONT}`;
+  ctx.textAlign="center";ctx.textBaseline="top";
+  ctx.globalAlpha=Math.min(1,thinkingAmt);
+  ctx.fillStyle=`rgb(${GREEN[0]},${GREEN[1]},${GREEN[2]})`;
+  ctx.fillText(txt,W/2,H*.26);
+  ctx.globalAlpha=1;ctx.textAlign="left";
+}
+
+function drawStateTag(dt,state,alert){
+  const label=alert?"ALERT":state.toUpperCase();
+  if(label!==tagState){tagState=label;stateTag=new D(`${AV.name} // ${label}`,40);}
+  const fs=Math.round(Math.min(W,H)*.032);
+  ctx.font=`${fs}px ${UI_FONT}`;ctx.textBaseline="alphabetic";
+  ctx.fillStyle=alert?`rgb(${RED[0]},${RED[1]},${RED[2]})`:"rgb(0,190,60)";
+  ctx.fillText(stateTag.render(dt),18,H-16);
+}
+
+/* Plan usage, bottom-RIGHT so it sits opposite the state tag rather than
+   fighting it for the same corner. Shared formatting via AV.util.usageRows. */
+function drawUsage(){
+  const rows=AV.util.usageRows();
+  if(!rows.length)return;
+  const fs=Math.round(Math.min(W,H)*.024);
+  ctx.save();
+  ctx.font=`${fs}px ${UI_FONT}`;
+  ctx.textAlign="right";ctx.textBaseline="alphabetic";
+  let y=H-16-(rows.length-1)*(fs+4);
+  for(const r of rows){
+    ctx.fillStyle=r.hot?`rgb(${RED[0]},${RED[1]},${RED[2]})`:"rgb(0,150,50)";
+    ctx.fillText(`${r.label} ${r.text}`,W-18,y);
+    y+=fs+4;
+  }
+  ctx.restore();
+}
+
+function drawAlertFrame(){
+  const pulse=.45+.55*Math.abs(Math.sin(now/250));
+  ctx.fillStyle=`rgba(${RED[0]},${RED[1]},${RED[2]},${.6*pulse})`;
+  ctx.fillRect(0,0,W,8);ctx.fillRect(0,H-8,W,8);
+  ctx.fillRect(0,0,8,H);ctx.fillRect(W-8,0,8,H);
+}
+
+/* ---------------- frame ---------------- */
+function frame(dt){
+  AV.tick(dt);
+  now+=dt;
+  const state=AV.state;
+  const tgt=state==="thinking"?1:0;
+  thinkingAmt+=(tgt-thinkingAmt)*Math.min(1,dt/400);
+  rain.update(dt,state,AV.alert,thinkingAmt,now);
+  const faceOn=face.update(dt,state==="speaking",AV.env,AV.alert,now);
+  ctx.fillStyle="#000";ctx.fillRect(0,0,W,H);
+  rainAlpha=Math.min(1,rainAlpha+dt/1500);
+  ctx.globalAlpha=rainAlpha;
+  ctx.drawImage(rain.canvas,0,0);
+  ctx.globalAlpha=1;
+  if(faceOn){
+    ctx.globalCompositeOperation="lighter";      // it glows OUT of the rain
+    ctx.drawImage(face.canvas,0,0);
+    ctx.globalCompositeOperation="source-over";
+  }
+  if(state==="listening")drawRibbon();else micHist.length=0;
+  if(thinkingAmt>.25)drawThinking(dt);else thinkLabel=null;
+  drawStateTag(dt,state,AV.alert);
+  drawUsage();
+  if(AV.alert)drawAlertFrame();
+}
+
+function resize(){
+  W=cv.width=innerWidth;H=cv.height=innerHeight;
+  rain=new Rain();face=new Face();rainAlpha=0;
+}
+addEventListener("resize",resize);
+resize();
+
+addEventListener("keydown",e=>{
+  if(e.key==="f"||e.key==="F"){
+    document.fullscreenElement?document.exitFullscreen()
+      :document.documentElement.requestFullscreen();
+  }
+});
+
+if(SHOT){
+  AV.shotRun(frame);
+}else{
+  let last=performance.now();
+  (function loop(ts){
+    const dt=Math.min(100,ts-last);last=ts;
+    frame(dt);
+    requestAnimationFrame(loop);
+  })(performance.now());
+}
+</script>
+</body>
+</html>
